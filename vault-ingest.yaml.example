@@ -1,0 +1,29 @@
+# sift configuration
+# Copy to your vault root as vault-ingest.yaml and edit.
+
+vault: ~/Documents/MyVault           # absolute path to vault root
+raw_dir: raw                         # relative to vault
+output_dir: captures                 # relative to vault
+state_dir: .vault-ingest             # relative to vault; holds queue.json + logs
+raw_ttl_days: 7                      # raw files older than this are deleted on next run
+
+schedule:
+  mode: manual                       # manual | cron — `sift watch` is required for cron
+  cron: "30 5 * * *"                 # daily 05:30
+
+enricher:
+  backend: openrouter                # openrouter | local (local in v1.1)
+  openrouter:
+    api_key_env: OPENROUTER_API_KEY
+    model_stt: groq/whisper-large-v3-turbo
+    model_text: google/gemini-2.5-flash-lite
+    model_vision: google/gemini-2.5-flash
+  monthly_budget_usd: 10             # optional; pipeline refuses enrichment when exceeded
+
+extractors:
+  yt_dlp_auto_upgrade: true
+
+private_caption_keywords:
+  - private
+  - internal
+  - confidential

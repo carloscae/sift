@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# sift
+.venv/
+.vault-ingest/
+*.egg-info/
+dist/
+.coverage
+.pytest_cache/
+.ruff_cache/
