@@ -86,7 +86,7 @@ Two registries underpin the pluggability:
 
 | Path | Purpose |
 |---|---|
-| `src/sift/cli.py` | Click CLI: `init`, `add`, `run`, `status`. `--vault` option resolves from arg, env (`SIFT_VAULT`), or cwd. |
+| `src/sift/cli.py` | Click CLI: `init`, `add`, `run`, `status`. `--vault` resolves from arg, `$SIFT_VAULT`, or cwd. `--config <path>` (or `$SIFT_CONFIG`) overrides the default `<vault>/vault-ingest.yaml` location, so the config can live in a hidden sub-folder. |
 | `src/sift/config.py` | Pydantic `Config` model loaded from `vault-ingest.yaml`. `OpenRouterConfig` + `EnricherConfig` nested. |
 | `src/sift/classify.py` | `classify_url(url)` and `classify_path(path)` returning typed `Item`. Hostname → platform mapping. |
 | `src/sift/queue.py` | JSON-backed queue. SHA256-prefix item IDs. `scan_raw` is batched (one write per call). |
@@ -144,6 +144,15 @@ mkdir /tmp/sift-test
 uv run sift init /tmp/sift-test
 uv run sift add https://example.com/some-article --vault /tmp/sift-test --now
 cat /tmp/sift-test/captures/*.md
+```
+
+To keep the config out of the vault root (e.g. for Obsidian users who want a clean sidebar):
+
+```bash
+uv run sift init /tmp/sift-test --config /tmp/sift-test/.config/sift.yaml
+# Then for subsequent commands:
+export SIFT_CONFIG=/tmp/sift-test/.config/sift.yaml
+uv run sift add https://example.com/some-article --now
 ```
 
 The OPENROUTER_API_KEY is in Carlos's macOS keychain on the laptop (saved 2026-05-19, source: `~/Projects/AkiraProject/.env`). Never commit it.

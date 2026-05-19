@@ -125,6 +125,24 @@ class CaptureData(BaseModel):
     transcript_or_ocr, tags, enriched_by, cost_usd, models, raw_file
 ```
 
+## Config file resolution
+
+sift looks for the config file in this order:
+
+1. `--config <path>` CLI flag
+2. `$SIFT_CONFIG` environment variable
+3. `<vault>/vault-ingest.yaml` where `<vault>` comes from `--vault`, `$SIFT_VAULT`, or the current working directory.
+
+This lets users who want a clean vault root (e.g. Obsidian users where root visibility matters) keep the config in a hidden sub-folder:
+
+```bash
+sift init ~/MyVault --config ~/MyVault/.config/sift.yaml
+export SIFT_CONFIG=~/MyVault/.config/sift.yaml
+sift add https://...
+```
+
+Whichever location is used, the YAML's `vault:` field is the canonical vault path. `raw_dir`, `output_dir`, and `state_dir` are relative to that vault.
+
 ## Filesystem layout (user-side)
 
 For a vault at `~/MyVault`:

@@ -56,6 +56,36 @@ def test_status_reports_pending(tmp_path: Path):
     assert "1 pending" in result.output
 
 
+def test_add_uses_config_flag(tmp_path: Path):
+    """`sift add --config <path>` reads from a custom config location."""
+    runner = CliRunner()
+    vault = tmp_path / "vault"
+    custom_config = tmp_path / "elsewhere" / "sift.yaml"
+    custom_config.parent.mkdir()
+    runner.invoke(main, ["init", str(vault), "--config", str(custom_config)])
+
+    result = runner.invoke(
+        main, ["add", "https://example.com/foo", "--config", str(custom_config)]
+    )
+    assert result.exit_code == 0, result.output
+    # Queue file should be created based on vault from the custom config.
+    assert (vault / ".vault-ingest" / "queue.json").is_file()
+
+
+def test_add_uses_sift_config_env(tmp_path: Path, monkeypatch):
+    """SIFT_CONFIG env var resolves the config path when --config not given."""
+    runner = CliRunner()
+    vault = tmp_path / "vault"
+    custom_config = tmp_path / "envcfg" / "sift.yaml"
+    custom_config.parent.mkdir()
+    runner.invoke(main, ["init", str(vault), "--config", str(custom_config)])
+
+    monkeypatch.setenv("SIFT_CONFIG", str(custom_config))
+    result = runner.invoke(main, ["add", "https://example.com/foo"])
+    assert result.exit_code == 0, result.output
+    assert (vault / ".vault-ingest" / "queue.json").is_file()
+
+
 def test_add_now_does_not_claim_processed_specific_item(tmp_path: Path):
     """--now should not claim it processed only the new item."""
     runner = CliRunner()

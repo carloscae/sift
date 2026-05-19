@@ -1,5 +1,8 @@
 # sift configuration
-# Copy to your vault root as vault-ingest.yaml and edit.
+# Default location: <vault-root>/vault-ingest.yaml
+# To put it elsewhere (e.g. a hidden sub-folder for Obsidian users), use:
+#   sift init <vault> --config <vault>/.config/sift.yaml
+# and then export SIFT_CONFIG=<vault>/.config/sift.yaml in your shell.
 
 vault: ~/Documents/MyVault           # absolute path to vault root
 raw_dir: raw                         # relative to vault
