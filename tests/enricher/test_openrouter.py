@@ -65,3 +65,42 @@ def test_summarise_returns_title_summary_tags(enricher: OpenRouterEnricher):
     assert result.summary == "Ship small. Ship often."
     assert "productivity" in result.tags
     assert result.cost_usd >= 0
+
+
+@respx.mock
+def test_caption_sends_image_as_base64(tmp_path: Path, enricher: OpenRouterEnricher):
+    img = tmp_path / "shot.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"fake-png")
+
+    route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "caption": "A screenshot of a tweet.",
+                            "ocr_text": "Hello world",
+                            "tags": ["screenshot", "twitter"],
+                        }),
+                    },
+                }],
+                "usage": {"prompt_tokens": 500, "completion_tokens": 30},
+            },
+        )
+    )
+
+    result = enricher.caption(img)
+
+    assert route.called
+    assert result.caption == "A screenshot of a tweet."
+    assert result.ocr_text == "Hello world"
+    req = route.calls.last.request
+    body = json.loads(req.content)
+    # Confirm at least one user-message part has image_url
+    has_image = any(
+        "image_url" in (p if isinstance(p, dict) else {})
+        for msg in body["messages"]
+        for p in (msg["content"] if isinstance(msg["content"], list) else [])
+    )
+    assert has_image

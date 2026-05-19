@@ -69,7 +69,58 @@ class OpenRouterEnricher(Enricher):
         )
 
     def caption(self, image_path: Path) -> CaptionResult:
-        raise NotImplementedError("caption() implemented in Task 3.4")
+        import base64
+        mime = {
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+        }.get(image_path.suffix.lstrip(".").lower(), "image/jpeg")
+        b64 = base64.b64encode(image_path.read_bytes()).decode()
+        data_url = f"data:{mime};base64,{b64}"
+
+        system_prompt = (
+            "Describe the image, and if there is any readable text, extract it verbatim. "
+            "Return a JSON object with keys: caption (string), ocr_text (string, '' if no text), "
+            "tags (array of 2-5 lowercase string tags). Return ONLY the JSON."
+        )
+
+        payload = {
+            "model": self.model_vision,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Describe this image and extract any text."},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        resp = self._client.post(
+            f"{_OR_BASE}/chat/completions",
+            headers={**self._headers(), "Content-Type": "application/json"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        content = body["choices"][0]["message"]["content"]
+        data = json.loads(content)
+
+        usage = body.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        cost = (prompt_tokens * 0.00000030) + (completion_tokens * 0.00000250)
+
+        return CaptionResult(
+            caption=data.get("caption", ""),
+            ocr_text=data.get("ocr_text", ""),
+            tags=[t.lower() for t in data.get("tags", [])][:5],
+            model=self.model_vision,
+            cost_usd=round(cost, 6),
+        )
 
     def summarise(self, text: str, context: dict | None = None) -> SummaryResult:
         system_prompt = (
