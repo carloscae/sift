@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import httpx
@@ -71,4 +72,46 @@ class OpenRouterEnricher(Enricher):
         raise NotImplementedError("caption() implemented in Task 3.4")
 
     def summarise(self, text: str, context: dict | None = None) -> SummaryResult:
-        raise NotImplementedError("summarise() implemented in Task 3.3")
+        system_prompt = (
+            "You receive transcribed audio or extracted text. "
+            "Produce a JSON object with keys: title (string, <=80 chars), "
+            "summary (2-3 sentence string), tags (array of 2-5 lowercase string tags). "
+            "Return ONLY the JSON, no prose."
+        )
+        ctx = context or {}
+        user_prompt = (
+            f"Source: {ctx.get('source', 'unknown')}\n"
+            f"Platform: {ctx.get('platform', 'unknown')}\n\n"
+            f"Content:\n{text[:8000]}"
+        )
+
+        payload = {
+            "model": self.model_text,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        resp = self._client.post(
+            f"{_OR_BASE}/chat/completions",
+            headers={**self._headers(), "Content-Type": "application/json"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        content = body["choices"][0]["message"]["content"]
+        data = json.loads(content)
+
+        usage = body.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        cost = (prompt_tokens * 0.00000010) + (completion_tokens * 0.00000040)
+
+        return SummaryResult(
+            title=data.get("title", "Untitled")[:80],
+            summary=data.get("summary", ""),
+            tags=[t.lower() for t in data.get("tags", [])][:5],
+            model=self.model_text,
+            cost_usd=round(cost, 6),
+        )
