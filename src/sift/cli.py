@@ -1,12 +1,34 @@
+import os
+import shutil
 from pathlib import Path
 
 import click
+
+from sift.config import load_config
+from sift.pipeline import process_pending
+from sift.queue import Queue
 
 
 @click.group()
 @click.version_option()
 def main() -> None:
     """sift — vault ingest pipeline."""
+
+
+def _vault_option(f):
+    return click.option(
+        "--vault",
+        type=click.Path(file_okay=False, resolve_path=True),
+        default=None,
+        help="Vault root (defaults to $SIFT_VAULT or current directory).",
+    )(f)
+
+
+def _resolve_config(vault: str | None):
+    if vault is None:
+        vault = os.environ.get("SIFT_VAULT", str(Path.cwd()))
+    config_path = Path(vault) / "vault-ingest.yaml"
+    return load_config(config_path)
 
 
 @main.command()
@@ -24,6 +46,53 @@ def init(vault_path: str) -> None:
         config_path.write_text(_default_config(vault))
 
     click.echo(f"✓ Initialised vault at {vault}")
+
+
+@main.command()
+@click.argument("target")
+@click.option("--now", is_flag=True, help="Process immediately instead of queueing.")
+@_vault_option
+def add(target: str, now: bool, vault: str | None) -> None:
+    """Queue a URL or file for processing."""
+    config = _resolve_config(vault)
+    queue = Queue(config)
+
+    if target.startswith(("http://", "https://")):
+        item_id = queue.enqueue_url(target)
+        click.echo(f"✓ Queued URL: {target}")
+    else:
+        path = Path(target).resolve()
+        if not path.exists():
+            raise click.ClickException(f"File not found: {path}")
+        dest = config.raw_path / path.name
+        shutil.copy2(path, dest)
+        item_id = queue.enqueue_file(dest)
+        click.echo(f"✓ Queued file: {dest}")
+
+    if now:
+        process_pending(config)
+        click.echo(f"✓ Processed item {item_id}")
+
+
+@main.command()
+@_vault_option
+def run(vault: str | None) -> None:
+    """Process all pending items in the queue."""
+    config = _resolve_config(vault)
+    process_pending(config)
+    click.echo("✓ Run complete")
+
+
+@main.command()
+@_vault_option
+def status(vault: str | None) -> None:
+    """Show queue status."""
+    config = _resolve_config(vault)
+    queue = Queue(config)
+    pending = queue.pending_items()
+    click.echo(f"{len(pending)} pending")
+    for entry in pending:
+        click.echo(f"  • [{entry.kind}] {entry.source}")
 
 
 def _default_config(vault: Path) -> str:
