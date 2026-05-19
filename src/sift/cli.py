@@ -81,11 +81,16 @@ def run(upgrade_extractors: bool, vault: str | None) -> None:
     """Process all pending items in the queue."""
     if upgrade_extractors:
         import subprocess
+        import sys
         click.echo("Upgrading yt-dlp…")
-        subprocess.run(
-            ["uv", "pip", "install", "--upgrade", "yt-dlp"],
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
+            capture_output=True,
+            text=True,
             check=False,
         )
+        if result.returncode != 0:
+            click.echo(f"⚠ yt-dlp upgrade failed: {result.stderr.strip()}", err=True)
     config = _resolve_config(vault)
     process_pending(config)
     click.echo("✓ Run complete")

@@ -75,7 +75,7 @@ class Queue:
         }
         new_items: list[Item] = []
         for path in self.config.raw_path.iterdir():
-            if not path.is_file():
+            if not path.is_file() or path.name.startswith("."):
                 continue
             item = classify_path(path)
             if item.source in seen_sources:

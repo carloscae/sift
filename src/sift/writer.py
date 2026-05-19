@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from slugify import slugify as _ext_slugify
 
 from sift.config import Config
+from sift.version import __version__
 
 
 class CaptureData(BaseModel):
@@ -50,7 +51,7 @@ def write_capture(config: Config, data: CaptureData) -> Path:
         frontmatter_lines.append(f"platform: {data.platform}")
     frontmatter_lines.extend(
         [
-            "ingested-via: sift@0.1.0",
+            f"ingested-via: sift@{__version__}",
             f"status: {status}",
             f"tags: [{', '.join(tags)}]",
         ]

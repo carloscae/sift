@@ -22,6 +22,22 @@ _STT_COST_PER_SEC = {
 _DEFAULT_STT_COST_PER_SEC = 0.0001
 
 
+def _raise_with_body(resp: httpx.Response, endpoint: str) -> None:
+    """Like resp.raise_for_status() but includes the response body in the error message.
+
+    OpenRouter (and most JSON APIs) put the real human-readable error in the body;
+    httpx's default exception only shows the status code + URL.
+    """
+    if resp.is_success:
+        return
+    body_preview = resp.text[:500] if resp.text else ""
+    raise httpx.HTTPStatusError(
+        f"OpenRouter {endpoint} returned {resp.status_code}: {body_preview}",
+        request=resp.request,
+        response=resp,
+    )
+
+
 class OpenRouterEnricher(Enricher):
     def __init__(
         self,
@@ -54,7 +70,7 @@ class OpenRouterEnricher(Enricher):
                 files=files,
                 data=data,
             )
-        resp.raise_for_status()
+        _raise_with_body(resp, "/audio/transcriptions")
         body = resp.json()
 
         duration = body.get("usage", {}).get("input_audio_seconds", 0)
@@ -104,7 +120,7 @@ class OpenRouterEnricher(Enricher):
             headers={**self._headers(), "Content-Type": "application/json"},
             json=payload,
         )
-        resp.raise_for_status()
+        _raise_with_body(resp, "/chat/completions")
         body = resp.json()
         content = body["choices"][0]["message"]["content"]
         data = json.loads(content)
@@ -149,7 +165,7 @@ class OpenRouterEnricher(Enricher):
             headers={**self._headers(), "Content-Type": "application/json"},
             json=payload,
         )
-        resp.raise_for_status()
+        _raise_with_body(resp, "/chat/completions")
         body = resp.json()
         content = body["choices"][0]["message"]["content"]
         data = json.loads(content)

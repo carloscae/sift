@@ -12,7 +12,13 @@ We maintain extractors for the platforms that fight scraping the hardest, so you
 
 ## Status
 
-Pre-alpha. v0.1.0 currently supports YouTube, TikTok, and generic article URLs, with OpenRouter as the AI backend. Roadmap → Instagram, X (video + text threads), Reddit, BlueSky, plus a local-model backend that runs fully offline.
+Pre-alpha. v0.1.0 ships:
+
+- Extraction for YouTube, TikTok (audio), and generic article URLs (text)
+- Summarisation + image captioning via OpenRouter (`/chat/completions`)
+- ⚠️ Transcription is **not yet working** in v0.1.0 — OpenRouter does not currently expose an OpenAI-compatible Whisper endpoint. See [issue #1](https://github.com/carloscae/sift/issues/1). Article URLs still produce full summaries; video URLs land with extracted audio in `raw/` but no transcript.
+
+Roadmap → fix transcription (v0.1.1), add Instagram, X (video + text threads), Reddit, BlueSky extractors, plus a local-model backend that runs fully offline.
 
 ## Quickstart
 
@@ -20,10 +26,11 @@ Pre-alpha. v0.1.0 currently supports YouTube, TikTok, and generic article URLs, 
 pip install sift
 sift init ~/Documents/MyVault
 export OPENROUTER_API_KEY=sk-or-...
-sift add https://tiktok.com/@user/video/123 --now
+# Article URLs work end-to-end today:
+sift add https://example.com/some-article --vault ~/Documents/MyVault --now
 ```
 
-Open `~/Documents/MyVault/captures/` — your note is there.
+Open `~/Documents/MyVault/captures/` — your note is there with title, summary, and full extracted text.
 
 ## Why not just use \<obvious alternative\>?
 
