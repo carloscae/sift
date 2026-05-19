@@ -52,3 +52,26 @@ def test_writes_stub_when_no_enrichment(tmp_vault: Path):
     content = out_path.read_text()
     assert "status: pending-enrichment" in content
     assert "enrich-cost-usd" not in content
+
+
+def test_slugify_cjk_title(tmp_vault: Path):
+    """CJK titles get transliterated, not stripped to 'untitled'."""
+    from sift.writer import _slugify
+    s = _slugify("日本語のタイトル")
+    assert s != "untitled"
+    assert len(s) > 0
+    # Should be slug-shaped (lowercase, dashes, no spaces)
+    assert " " not in s
+
+
+def test_slugify_emoji_only_falls_back_to_untitled():
+    from sift.writer import _slugify
+    assert _slugify("🎉🔥") == "untitled"
+
+
+def test_slugify_preserves_german_umlauts_as_transliteration():
+    from sift.writer import _slugify
+    s = _slugify("Über München — Eine Reise")
+    assert s != "untitled"
+    # Common transliteration: ü → u, ö → o
+    assert "u" in s and "m" in s

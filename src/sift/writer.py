@@ -1,8 +1,8 @@
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+from slugify import slugify as _ext_slugify
 
 from sift.config import Config
 
@@ -23,9 +23,8 @@ class CaptureData(BaseModel):
 
 
 def _slugify(title: str, max_len: int = 50) -> str:
-    slug = re.sub(r"[^\w\s-]", "", title.lower())
-    slug = re.sub(r"[\s_-]+", "-", slug).strip("-")
-    return slug[:max_len] or "untitled"
+    s = _ext_slugify(title, max_length=max_len, word_boundary=True, save_order=True)
+    return s or "untitled"
 
 
 def write_capture(config: Config, data: CaptureData) -> Path:
