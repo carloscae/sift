@@ -41,3 +41,16 @@ def test_pending_items_returns_unprocessed(tmp_vault: Path):
     q.enqueue_url("https://x.com/bar")
     items = q.pending_items()
     assert len(items) == 2
+
+
+def test_scan_raw_batches_writes(tmp_vault: Path):
+    """scan_raw with N new files writes queue.json once, not N times."""
+    for i in range(3):
+        (tmp_vault / "raw" / f"voice{i}.mp3").write_bytes(b"x")
+
+    q = Queue(_config(tmp_vault))
+    items = q.scan_raw()
+    assert len(items) == 3
+    # All 3 items present in queue state after a single scan
+    state = json.loads((tmp_vault / ".vault-ingest" / "queue.json").read_text())
+    assert len(state["pending"]) == 3

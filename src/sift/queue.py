@@ -43,29 +43,27 @@ class Queue:
     def _hash_source(source: str) -> str:
         return hashlib.sha256(source.encode()).hexdigest()[:12]
 
-    def enqueue_url(self, url: str) -> str:
-        item = classify_url(url)
-        item_id = self._hash_source(url)
+    def _enqueue_item(self, item_id: str, item: Item, *, save: bool) -> None:
         self._state.pending[item_id] = QueueEntry(
             id=item_id,
             source=item.source,
             kind=item.kind.value,
             platform=item.platform,
+            local_path=str(item.local_path) if item.local_path else None,
         )
-        self._save()
+        if save:
+            self._save()
+
+    def enqueue_url(self, url: str) -> str:
+        item = classify_url(url)
+        item_id = self._hash_source(url)
+        self._enqueue_item(item_id, item, save=True)
         return item_id
 
     def enqueue_file(self, path: Path) -> str:
         item = classify_path(path)
         item_id = self._hash_source(str(path))
-        self._state.pending[item_id] = QueueEntry(
-            id=item_id,
-            source=item.source,
-            kind=item.kind.value,
-            platform=item.platform,
-            local_path=str(path) if item.local_path else None,
-        )
-        self._save()
+        self._enqueue_item(item_id, item, save=True)
         return item_id
 
     def scan_raw(self) -> list[Item]:
@@ -75,11 +73,18 @@ class Queue:
         seen_sources = {
             e.source for e in {**self._state.pending, **self._state.processed}.values()
         }
-        new_items = []
+        new_items: list[Item] = []
         for path in self.config.raw_path.iterdir():
-            if path.is_file() and str(path) not in seen_sources:
-                self.enqueue_file(path)
-                new_items.append(classify_path(path))
+            if not path.is_file():
+                continue
+            item = classify_path(path)
+            if item.source in seen_sources:
+                continue
+            item_id = self._hash_source(str(path))
+            self._enqueue_item(item_id, item, save=False)
+            new_items.append(item)
+        if new_items:
+            self._save()
         return new_items
 
     def pending_items(self) -> list[QueueEntry]:
