@@ -60,8 +60,11 @@ def classify_path(path: Path) -> Item:
         url = path.read_text().strip()
         return classify_url(url)
     if suffix == ".txt":
-        text = path.read_text().strip()
-        first_line = text.splitlines()[0] if text else ""
+        try:
+            with path.open() as f:
+                first_line = f.readline().strip()
+        except OSError:
+            first_line = ""
         if first_line.startswith(("http://", "https://")):
             return classify_url(first_line)
 

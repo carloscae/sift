@@ -58,7 +58,7 @@ def add(target: str, now: bool, vault: str | None) -> None:
     queue = Queue(config)
 
     if target.startswith(("http://", "https://")):
-        item_id = queue.enqueue_url(target)
+        queue.enqueue_url(target)
         click.echo(f"✓ Queued URL: {target}")
     else:
         path = Path(target).resolve()
@@ -66,12 +66,12 @@ def add(target: str, now: bool, vault: str | None) -> None:
             raise click.ClickException(f"File not found: {path}")
         dest = config.raw_path / path.name
         shutil.copy2(path, dest)
-        item_id = queue.enqueue_file(dest)
+        queue.enqueue_file(dest)
         click.echo(f"✓ Queued file: {dest}")
 
     if now:
         process_pending(config)
-        click.echo(f"✓ Processed item {item_id}")
+        click.echo("✓ Queue processed")
 
 
 @main.command()
