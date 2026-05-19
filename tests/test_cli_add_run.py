@@ -1,8 +1,19 @@
 from pathlib import Path
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
 from sift.cli import main
+from sift.extractors.base import ExtractFailure
+
+
+def _stub_failure(url: str = "https://example.com") -> ExtractFailure:
+    return ExtractFailure(
+        url=url,
+        platform="generic",
+        error_class="unknown",
+        error_detail="(no extraction in this test)",
+    )
 
 
 def test_add_then_run_creates_capture(tmp_path: Path):
@@ -13,7 +24,8 @@ def test_add_then_run_creates_capture(tmp_path: Path):
     result = runner.invoke(main, ["add", "https://example.com/foo", "--vault", str(vault)])
     assert result.exit_code == 0, result.output
 
-    result = runner.invoke(main, ["run", "--vault", str(vault)])
+    with patch("sift.pipeline.dispatch_extract", return_value=_stub_failure()):
+        result = runner.invoke(main, ["run", "--vault", str(vault)])
     assert result.exit_code == 0, result.output
 
     captures = list((vault / "captures").glob("*.md"))
@@ -51,7 +63,8 @@ def test_add_now_does_not_claim_processed_specific_item(tmp_path: Path):
     runner.invoke(main, ["init", str(vault)])
     runner.invoke(main, ["add", "https://a.com", "--vault", str(vault)])  # pre-existing pending
 
-    result = runner.invoke(main, ["add", "https://b.com", "--now", "--vault", str(vault)])
+    with patch("sift.pipeline.dispatch_extract", return_value=_stub_failure()):
+        result = runner.invoke(main, ["add", "https://b.com", "--now", "--vault", str(vault)])
     assert result.exit_code == 0
     # Should not contain a specific item_id claim — should be the new generic message.
     assert "Processed item " not in result.output
