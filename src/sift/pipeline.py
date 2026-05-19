@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import structlog
@@ -32,19 +33,22 @@ def _process_one(config: Config, entry: QueueEntry) -> None:
     work_dir = config.state_path / "work" / entry.id
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    extract_result: ExtractResult | ExtractFailure | None = None
+    try:
+        extract_result: ExtractResult | ExtractFailure | None = None
 
-    if entry.kind == ItemKind.URL.value:
-        extract_result = dispatch_extract(entry.source, work_dir)
+        if entry.kind == ItemKind.URL.value:
+            extract_result = dispatch_extract(entry.source, work_dir)
 
-    if isinstance(extract_result, ExtractFailure):
-        _write_failure_stub(config, entry, extract_result)
-        return
+        if isinstance(extract_result, ExtractFailure):
+            _write_failure_stub(config, entry, extract_result)
+            return
 
-    if extract_result is not None:
-        _write_from_extract(config, entry, extract_result, work_dir)
-    else:
-        _write_file_stub(config, entry)
+        if extract_result is not None:
+            _write_from_extract(config, entry, extract_result, work_dir)
+        else:
+            _write_file_stub(config, entry)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def _write_from_extract(
@@ -54,7 +58,7 @@ def _write_from_extract(
     if result.media_path:
         dest = config.raw_path / f"{entry.id}-{result.media_path.name}"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        result.media_path.rename(dest)
+        result.media_path.replace(dest)
         raw_file = str(dest.relative_to(config.vault))
 
     data = CaptureData(
