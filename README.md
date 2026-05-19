@@ -40,6 +40,12 @@ Most "save to second brain" tools either stop at clipping the URL (and leave you
 
 See `vault-ingest.yaml.example` for a full config. Defaults work for most users.
 
+## Architecture + roadmap
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — pipeline stages, registries, data contracts, how to add an extractor or enricher backend.
+- [ROADMAP.md](ROADMAP.md) — what's coming next.
+- [Issues](https://github.com/carloscae/sift/issues) — open work.
+
 ## License
 
 MIT
