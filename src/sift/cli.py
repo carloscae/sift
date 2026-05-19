@@ -75,9 +75,17 @@ def add(target: str, now: bool, vault: str | None) -> None:
 
 
 @main.command()
+@click.option("--upgrade-extractors", is_flag=True, help="Upgrade yt-dlp before running.")
 @_vault_option
-def run(vault: str | None) -> None:
+def run(upgrade_extractors: bool, vault: str | None) -> None:
     """Process all pending items in the queue."""
+    if upgrade_extractors:
+        import subprocess
+        click.echo("Upgrading yt-dlp…")
+        subprocess.run(
+            ["uv", "pip", "install", "--upgrade", "yt-dlp"],
+            check=False,
+        )
     config = _resolve_config(vault)
     process_pending(config)
     click.echo("✓ Run complete")
