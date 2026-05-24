@@ -12,13 +12,13 @@ We maintain extractors for the platforms that fight scraping the hardest, so you
 
 ## Status
 
-Pre-alpha. v0.1.0 ships:
+Pre-alpha. v0.1.1 ships:
 
-- Extraction for YouTube, TikTok (audio), and generic article URLs (text)
+- Extraction + transcription for YouTube and TikTok (audio via yt-dlp, transcribed locally via [whisper-svc](https://github.com/carloscae/whisper-svc))
+- Extraction for generic article URLs (text)
 - Summarisation + image captioning via OpenRouter (`/chat/completions`)
-- ⚠️ Transcription is **not yet working** in v0.1.0 — OpenRouter does not currently expose an OpenAI-compatible Whisper endpoint. See [issue #1](https://github.com/carloscae/sift/issues/1). Article URLs still produce full summaries; video URLs land with extracted audio in `raw/` but no transcript.
 
-Roadmap → fix transcription (v0.1.1), add Instagram, X (video + text threads), Reddit, BlueSky extractors, plus a local-model backend that runs fully offline.
+Roadmap → add X (video + text threads) and Instagram extractors, then a Telegram bridge.
 
 ## Quickstart
 
@@ -26,11 +26,12 @@ Roadmap → fix transcription (v0.1.1), add Instagram, X (video + text threads),
 pip install sift
 sift init ~/Documents/MyVault
 export OPENROUTER_API_KEY=sk-or-...
-# Article URLs work end-to-end today:
-sift add https://example.com/some-article --vault ~/Documents/MyVault --now
+sift add https://www.youtube.com/watch?v=jNQXAC9IVRw --vault ~/Documents/MyVault --now
 ```
 
-Open `~/Documents/MyVault/captures/` — your note is there with title, summary, and full extracted text.
+Open `~/Documents/MyVault/captures/` — your note is there with title, summary, and full transcript.
+
+**Note:** transcription requires [whisper-svc](https://github.com/carloscae/whisper-svc) running locally. Configure the endpoint in `vault-ingest.yaml` under `enricher.openrouter.whisper_svc_url`.
 
 ## Why not just use \<obvious alternative\>?
 

@@ -17,9 +17,9 @@ def test_load_config_resolves_paths(tmp_vault: Path):
         "  backend: openrouter\n"
         "  openrouter:\n"
         "    api_key_env: OPENROUTER_API_KEY\n"
-        "    model_stt: groq/whisper-large-v3-turbo\n"
         "    model_text: google/gemini-2.5-flash-lite\n"
         "    model_vision: google/gemini-2.5-flash\n"
+        "    whisper_svc_url: http://localhost:8742\n"
     )
 
     config = load_config(config_path)
@@ -31,7 +31,7 @@ def test_load_config_resolves_paths(tmp_vault: Path):
     assert config.state_path == tmp_vault / ".vault-ingest"
     assert config.raw_ttl_days == 7
     assert config.enricher.backend == "openrouter"
-    assert config.enricher.openrouter.model_stt == "groq/whisper-large-v3-turbo"
+    assert config.enricher.openrouter.whisper_svc_url == "http://localhost:8742"
 
 
 def test_load_config_missing_file_raises(tmp_path: Path):

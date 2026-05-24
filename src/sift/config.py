@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 
 class OpenRouterConfig(BaseModel):
     api_key_env: str = "OPENROUTER_API_KEY"
-    model_stt: str = "groq/whisper-large-v3-turbo"
     model_text: str = "google/gemini-2.5-flash-lite"
     model_vision: str = "google/gemini-2.5-flash"
+    whisper_svc_url: str = "http://localhost:8742"
 
 
 class EnricherConfig(BaseModel):

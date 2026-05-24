@@ -16,9 +16,9 @@ def build_enricher(config: Config) -> Enricher:
             )
         return OpenRouterEnricher(
             api_key=api_key,
-            model_stt=or_cfg.model_stt,
             model_text=or_cfg.model_text,
             model_vision=or_cfg.model_vision,
+            whisper_svc_url=or_cfg.whisper_svc_url,
         )
     if backend == "local":
         raise NotImplementedError("local enricher backend not yet implemented (v1.1)")

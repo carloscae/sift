@@ -15,12 +15,6 @@ logger = structlog.get_logger()
 
 _OR_BASE = "https://openrouter.ai/api/v1"
 
-_STT_COST_PER_SEC = {
-    "groq/whisper-large-v3-turbo": 0.000011,
-    "openai/whisper-1": 0.0001,
-}
-_DEFAULT_STT_COST_PER_SEC = 0.0001
-
 
 def _raise_with_body(resp: httpx.Response, endpoint: str) -> None:
     """Like resp.raise_for_status() but includes the response body in the error message.
@@ -42,15 +36,15 @@ class OpenRouterEnricher(Enricher):
     def __init__(
         self,
         api_key: str,
-        model_stt: str,
         model_text: str,
         model_vision: str,
+        whisper_svc_url: str = "http://localhost:8742",
         client: httpx.Client | None = None,
     ):
         self.api_key = api_key
-        self.model_stt = model_stt
         self.model_text = model_text
         self.model_vision = model_vision
+        self.whisper_svc_url = whisper_svc_url.rstrip("/")
         self._client = client or httpx.Client(timeout=120.0)
 
     def _headers(self) -> dict:
@@ -62,26 +56,18 @@ class OpenRouterEnricher(Enricher):
 
     def transcribe(self, audio_path: Path) -> TranscriptResult:
         with audio_path.open("rb") as f:
-            files = {"file": (audio_path.name, f, "audio/mpeg")}
-            data = {"model": self.model_stt}
             resp = self._client.post(
-                f"{_OR_BASE}/audio/transcriptions",
-                headers=self._headers(),
-                files=files,
-                data=data,
+                f"{self.whisper_svc_url}/transcribe",
+                files={"file": (audio_path.name, f, "audio/mpeg")},
+                timeout=300.0,
             )
-        _raise_with_body(resp, "/audio/transcriptions")
+        _raise_with_body(resp, "/transcribe")
         body = resp.json()
 
-        duration = body.get("usage", {}).get("input_audio_seconds", 0)
-        per_sec = _STT_COST_PER_SEC.get(self.model_stt, _DEFAULT_STT_COST_PER_SEC)
-        cost = duration * per_sec
-
         return TranscriptResult(
-            text=body["text"],
-            model=self.model_stt,
-            cost_usd=round(cost, 6),
-            duration_sec=duration or None,
+            text=body["transcript"],
+            model=body.get("model", "whisper-large-v3-turbo"),
+            cost_usd=0.0,
         )
 
     def caption(self, image_path: Path) -> CaptionResult:

@@ -12,21 +12,21 @@ from sift.enricher.openrouter import OpenRouterEnricher
 def enricher() -> OpenRouterEnricher:
     return OpenRouterEnricher(
         api_key="sk-or-test",
-        model_stt="groq/whisper-large-v3-turbo",
         model_text="google/gemini-2.5-flash-lite",
         model_vision="google/gemini-2.5-flash",
+        whisper_svc_url="http://localhost:8742",
     )
 
 
 @respx.mock
-def test_transcribe_posts_audio_and_parses(tmp_path: Path, enricher: OpenRouterEnricher):
+def test_transcribe_calls_whisper_svc(tmp_path: Path, enricher: OpenRouterEnricher):
     audio = tmp_path / "voice.mp3"
     audio.write_bytes(b"fake-mp3-bytes")
 
-    route = respx.post("https://openrouter.ai/api/v1/audio/transcriptions").mock(
+    route = respx.post("http://localhost:8742/transcribe").mock(
         return_value=httpx.Response(
             200,
-            json={"text": "Hello there.", "usage": {"input_audio_seconds": 12}},
+            json={"transcript": "Hello there.", "language": "en", "model": "mlx-community/whisper-large-v3-turbo"},
         )
     )
 
@@ -34,8 +34,8 @@ def test_transcribe_posts_audio_and_parses(tmp_path: Path, enricher: OpenRouterE
 
     assert route.called
     assert result.text == "Hello there."
-    assert result.model == "groq/whisper-large-v3-turbo"
-    assert result.cost_usd > 0
+    assert result.model == "mlx-community/whisper-large-v3-turbo"
+    assert result.cost_usd == 0.0
 
 
 @respx.mock

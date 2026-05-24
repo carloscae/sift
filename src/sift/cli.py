@@ -158,7 +158,7 @@ def _default_config(vault: Path) -> str:
         "  backend: openrouter\n"
         "  openrouter:\n"
         "    api_key_env: OPENROUTER_API_KEY\n"
-        "    model_stt: groq/whisper-large-v3-turbo\n"
+        "    whisper_svc_url: http://localhost:8742\n"
         "    model_text: google/gemini-2.5-flash-lite\n"
         "    model_vision: google/gemini-2.5-flash\n"
     )

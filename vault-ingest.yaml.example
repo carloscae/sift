@@ -18,9 +18,9 @@ enricher:
   backend: openrouter                # openrouter | local (local in v1.1)
   openrouter:
     api_key_env: OPENROUTER_API_KEY
-    model_stt: groq/whisper-large-v3-turbo
     model_text: google/gemini-2.5-flash-lite
     model_vision: google/gemini-2.5-flash
+    whisper_svc_url: http://localhost:8742   # whisper-svc endpoint for local transcription
   monthly_budget_usd: 10             # optional; pipeline refuses enrichment when exceeded
 
 extractors:
