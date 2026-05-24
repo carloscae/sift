@@ -12,40 +12,33 @@ A small FastAPI service wrapping mlx-whisper (Whisper Large v3 Turbo). Lives in 
 
 Shared across all callers: sift, iPhone shortcuts (via Tailscale), and the future Telegram bridge. One service, one model, one place to update.
 
-## v0.1.1 — wire transcription to whisper-svc
+## v0.1.1 — shipped 2026-05-25
 
-Drop the broken `OpenRouterEnricher.transcribe()` path entirely. sift calls `whisper-svc` at `http://localhost:PORT/transcribe` instead. OpenRouter stays for summarisation and image captioning.
+Wired transcription to local whisper-svc (port 8742) instead of OpenRouter audio endpoint. Removed `model_stt`/Groq dependency. 54 tests.
 
-- Replace `transcribe()` with an HTTP call to whisper-svc
-- Remove `_STT_COST_PER_SEC` table (transcription is now local, zero cost)
-- Drop the issue-#1 warning from `README.md`; restore a YouTube-based quickstart
+## v0.1.2 — shipped 2026-05-25
 
-Acceptance: `sift add https://www.youtube.com/watch?v=jNQXAC9IVRw --vault /tmp/v --now` produces a capture with a non-empty transcript and `status: raw`.
+X/Twitter extractor: yt-dlp for video tweets, fxtwitter API fallback for text threads. t.co short-link resolution. Registered before GenericUrlExtractor in dispatcher. 58 tests.
 
-## v0.2.0 — Instagram + X extractors + failure handling
+## v0.2.0 — Telegram bridge (in progress)
 
-The two platforms missing from the current stack:
+Send a URL to the personal Telegram bot → sift picks it up automatically. UX north star for daily use.
+
+Architecture:
+- tgbot (Docker) detects bare URLs in personal chat, writes JSON to `/vault/.sift-queue.d/`
+- Host LaunchAgent (`com.carloscae.sift-watcher`) wakes on WatchPaths, calls `sift add <url> --now`, deletes the JSON
+- Vault `vault-ingest.yaml` configured (done)
+- Queue dir `.sift-queue.d/` created in vault (done)
+- `sift-queue-watcher.py` and LaunchAgent plist written and loaded (done)
+
+**Remaining:** Apply `tgbot-url-routing.patch` to `/Volumes/External/docker/config/tgbot/bot.py`, rebuild tgbot, smoke test.
+
+## v0.3.0 — Instagram + failure handling
 
 - Instagram (yt-dlp via cookie file)
-- X video (yt-dlp)
-- X text threads (fxtwitter / nitter fallback)
-
-Failure handling improvements deferred from v0.1.0:
-
 - `scan_raw` includes `failed` items in the seen-source check; explicit `--retry-failed` flag on `sift run`.
 - Per-stage status on `QueueEntry` so "extraction worked, enrichment didn't" is distinguishable from "extraction failed."
 - Failure log surfaced via `sift status --verbose` with per-entry error_class.
-
-## v0.3.0 — Telegram bridge
-
-Send a link or audio to a Telegram bot like sharing with a friend. The bot detects content type, routes to the right extractor, enriches, and writes a capture note to the vault. Replaces the current iPhone shortcut + manual inbox flow.
-
-- Telegram bot worker (polling mode, no webhook required for personal use)
-- Routes URLs to existing sift extractors; audio messages to whisper-svc
-- Writes directly to configured vault path
-- Accessible via Tailscale from iPhone
-
-This is the UX north star for personal use.
 
 ## Parked — revisit after 60 days of real usage
 

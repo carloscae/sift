@@ -1,0 +1,51 @@
+--- a/bot.py
++++ b/bot.py
+@@ -1,6 +1,7 @@
++import json
+ import os
+ import re
+ import time
+ import datetime
+ import secrets
+ import requests
+ from pathlib import Path
+@@ -13,6 +14,8 @@ AGENT_TOPIC_ID = str(os.environ.get("AGENT_TOPIC_ID", "")).strip() or None
+ WEBHOOK_URL = "http://webhook:9000/hooks/docker-update"
+ WEBHOOK_TOKEN = os.environ["UPDATE_WEBHOOK_TOKEN"]
+ INBOX_PATH = os.environ.get("INBOX_PATH", "/vault/telegram-inbox.md")
++SIFT_QUEUE_DIR = os.environ.get("SIFT_QUEUE_DIR", "/vault/.sift-queue.d")
+ CONVERSATIONS_DIR = os.environ.get("CONVERSATIONS_DIR", "/vault/conversations")
+ TRIGGER_FILE = os.environ.get("TRIGGER_FILE", os.path.join(CONVERSATIONS_DIR, ".trigger"))
+ BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
+@@ -36,6 +39,19 @@ HELP = (
+ )
+
+
++_URL_RE = re.compile(r'^https?://\S+$')
++
++
++def _is_bare_url(text: str) -> bool:
++    return bool(_URL_RE.match(text.strip()))
++
++
++def _enqueue_sift(url: str, chat_id: str, thread_id):
++    ts = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
++    Path(SIFT_QUEUE_DIR).mkdir(parents=True, exist_ok=True)
++    entry = {"url": url, "chat_id": chat_id, "ts": ts}
++    fname = f"{ts}-{secrets.token_hex(3)}.json"
++    Path(SIFT_QUEUE_DIR, fname).write_text(json.dumps(entry))
++    send("⏳ sifting…", chat_id=chat_id, thread_id=thread_id)
++
++
+ def send(text, chat_id=None, thread_id=None):
+     target = chat_id or PERSONAL_CHAT_ID or GROUP_CHAT_ID
+     payload = {"chat_id": target, "text": text}
+@@ -319,7 +335,11 @@ def poll():
+                     elif is_agent_topic(chat_id, thread_id):
+                         log(f"  → conversation route")
+                         route_conversation_turn(text, sender_id, chat_id, thread_id)
++                    elif _is_bare_url(text) and chat_id == PERSONAL_CHAT_ID:
++                        log(f"  → sift URL route")
++                        _enqueue_sift(text, chat_id, thread_id)
+                     else:
+                         log(f"  → drop (not slash, not in agent topic)")
