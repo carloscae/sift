@@ -44,8 +44,9 @@ def _process_one(config: Config, entry: QueueEntry, enricher: Enricher | None) -
         if entry.kind == ItemKind.URL.value:
             result = dispatch_extract(entry.source, work_dir)
             if isinstance(result, ExtractFailure):
-                _write_failure_stub(config, entry, result)
-                return
+                raise RuntimeError(
+                    f"extraction-failed [{result.error_class}]: {result.error_detail}"
+                )
             _enrich_and_write(config, entry, result, enricher)
         else:
             _enrich_file_and_write(config, entry, enricher)
@@ -180,22 +181,6 @@ def _enrich_file_and_write(
     )
     write_capture(config, data)
 
-
-def _write_failure_stub(
-    config: Config, entry: QueueEntry, failure: ExtractFailure,
-) -> None:
-    data = CaptureData(
-        item_id=entry.id,
-        source=entry.source,
-        platform=failure.platform,
-        subtype="url-failed",
-        title=f"[Extraction failed] {entry.source}",
-        summary=(
-            f"**{failure.error_class}**: {failure.error_detail}"
-            f"\n\n{failure.suggested_t2 or ''}"
-        ),
-    )
-    write_capture(config, data)
 
 
 def _subtype_from_media(media_type: str, platform: str) -> str:

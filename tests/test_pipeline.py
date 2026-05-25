@@ -8,7 +8,7 @@ from sift.pipeline import process_pending
 from sift.queue import Queue
 
 
-def test_process_pending_creates_stub_for_url(tmp_vault: Path):
+def test_process_pending_marks_failed_for_url(tmp_vault: Path):
     config = Config(vault=tmp_vault)
     q = Queue(config)
     q.enqueue_url("https://example.com/article")
@@ -22,11 +22,11 @@ def test_process_pending_creates_stub_for_url(tmp_vault: Path):
     with patch("sift.pipeline.dispatch_extract", return_value=fake_failure):
         process_pending(config)
 
+    # No stub written to captures — failures go to queue state only
     captures = list(config.captures_path.glob("*.md"))
-    assert len(captures) == 1
-    content = captures[0].read_text()
-    assert "https://example.com/article" in content
-    assert "status: pending-enrichment" in content
+    assert len(captures) == 0
+    state = q._load()
+    assert any("example.com" in str(e.source) for e in state.failed.values())
 
 
 def test_process_pending_marks_item_processed(tmp_vault: Path):
