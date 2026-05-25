@@ -38,19 +38,22 @@ def _tg_send(token: str, chat_id: str, text: str) -> None:
         print(f"telegram notify failed: {e}", file=sys.stderr)
 
 
-def _new_capture_title(before: set) -> str | None:
+def _new_capture_info(before: set) -> tuple[str | None, bool]:
+    """Returns (title_or_none, is_extraction_failure)."""
     try:
         after = set(CAPTURES_DIR.glob("*.md"))
         new_files = after - before
         if not new_files:
-            return None
+            return None, False
         newest = sorted(new_files, key=lambda p: p.stat().st_mtime)[-1]
-        for line in newest.read_text().splitlines():
+        content = newest.read_text()
+        is_failure = "subtype: url-failed" in content
+        for line in content.splitlines():
             if line.startswith("# "):
-                return line[2:].strip()
+                return line[2:].strip(), is_failure
     except Exception:
         pass
-    return None
+    return None, False
 
 
 _extra_env = _load_env()
@@ -73,8 +76,13 @@ for f in sorted(QUEUE_DIR.glob("*.json")):
         f.unlink()
 
         if _bot_token and chat_id:
-            title = _new_capture_title(captures_before)
-            msg = f"✓ {title}" if title else "✓ saved to captures/"
+            title, is_failure = _new_capture_info(captures_before)
+            if is_failure:
+                msg = f"❌ could not extract: {url}"
+            elif title:
+                msg = f"✓ {title}"
+            else:
+                msg = "✓ saved to captures/"
             _tg_send(_bot_token, chat_id, msg)
 
     except Exception as e:
