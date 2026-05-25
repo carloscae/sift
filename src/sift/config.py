@@ -11,9 +11,15 @@ class OpenRouterConfig(BaseModel):
     whisper_svc_url: str = "http://localhost:8742"
 
 
+class ClaudeCliConfig(BaseModel):
+    claude_bin: str = "claude"
+    whisper_svc_url: str = "http://localhost:8742"
+
+
 class EnricherConfig(BaseModel):
     backend: str = "openrouter"
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
+    claude_cli: ClaudeCliConfig = Field(default_factory=ClaudeCliConfig)
     monthly_budget_usd: float | None = None
 
 
@@ -30,15 +36,18 @@ class Config(BaseModel):
 
     @property
     def raw_path(self) -> Path:
-        return self.vault / self.raw_dir
+        p = Path(self.raw_dir)
+        return p if p.is_absolute() else self.vault / self.raw_dir
 
     @property
     def captures_path(self) -> Path:
-        return self.vault / self.output_dir
+        p = Path(self.output_dir)
+        return p if p.is_absolute() else self.vault / self.output_dir
 
     @property
     def state_path(self) -> Path:
-        return self.vault / self.state_dir
+        p = Path(self.state_dir)
+        return p if p.is_absolute() else self.vault / self.state_dir
 
 
 def load_config(path: Path) -> Config:
