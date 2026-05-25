@@ -56,12 +56,20 @@ def _process_one(config: Config, entry: QueueEntry, enricher: Enricher | None) -
 def _enrich_and_write(
     config: Config, entry: QueueEntry, result: ExtractResult, enricher: Enricher | None,
 ) -> None:
-    raw_file_rel = None
+    raw_file_path: Path | None = None
     if result.media_path:
         dest = config.raw_path / f"{entry.id}-{result.media_path.name}"
         dest.parent.mkdir(parents=True, exist_ok=True)
         result.media_path.replace(dest)
-        raw_file_rel = str(dest.relative_to(config.vault))
+        raw_file_path = dest
+
+    # Store path relative to vault when possible, otherwise absolute
+    raw_file_rel: str | None = None
+    if raw_file_path is not None:
+        try:
+            raw_file_rel = str(raw_file_path.relative_to(config.vault))
+        except ValueError:
+            raw_file_rel = str(raw_file_path)
 
     transcript_text = result.text_content
     cost_usd = result.cost_usd
@@ -72,8 +80,8 @@ def _enrich_and_write(
     tags: list[str] = []
 
     if enricher is not None:
-        if result.media_type == "audio" and raw_file_rel:
-            audio_path = config.vault / raw_file_rel
+        if result.media_type == "audio" and raw_file_path is not None:
+            audio_path = raw_file_path
             t = enricher.transcribe(audio_path)
             transcript_text = t.text
             cost_usd += t.cost_usd
