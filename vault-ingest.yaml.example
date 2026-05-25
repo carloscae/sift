@@ -5,23 +5,39 @@
 # and then export SIFT_CONFIG=<vault>/.config/sift.yaml in your shell.
 
 vault: ~/Documents/MyVault           # absolute path to vault root
-raw_dir: raw                         # relative to vault
-output_dir: captures                 # relative to vault
-state_dir: .vault-ingest             # relative to vault; holds queue.json + logs
+raw_dir: raw                         # relative to vault, or absolute path
+output_dir: captures                 # relative to vault, or absolute path
+state_dir: .vault-ingest             # relative to vault, or absolute path; holds queue.json
 raw_ttl_days: 7                      # raw files older than this are deleted on next run
 
-schedule:
-  mode: manual                       # manual | cron — `sift watch` is required for cron
-  cron: "30 5 * * *"                 # daily 05:30
+# Tip: if your vault is on iCloud Drive, use absolute paths for raw_dir and state_dir
+# to avoid iCloud blocking file operations in background processes:
+#   raw_dir: /Users/you/.sift/raw
+#   state_dir: /Users/you/.sift/state
 
 enricher:
-  backend: openrouter                # openrouter | local (local in v1.1)
+  # Two backends available:
+  #
+  # claude-cli — uses your Claude Code subscription, zero extra cost.
+  #   Summarisation via `claude -p`. No API key needed.
+  #   Vision/image captioning not supported; use openrouter for that.
+  #
+  # openrouter — pay-per-token via OpenRouter API (~$0.0001/clip with Gemini Flash Lite).
+  #   Supports all media types including image captioning.
+
+  backend: claude-cli                 # claude-cli | openrouter
+
+  claude_cli:
+    claude_bin: claude                # full path if `claude` is not in PATH
+    whisper_svc_url: http://localhost:8742
+
   openrouter:
     api_key_env: OPENROUTER_API_KEY
     model_text: google/gemini-2.5-flash-lite
     model_vision: google/gemini-2.5-flash
-    whisper_svc_url: http://localhost:8742   # whisper-svc endpoint for local transcription
-  monthly_budget_usd: 10             # optional; pipeline refuses enrichment when exceeded
+    whisper_svc_url: http://localhost:8742
+
+  monthly_budget_usd: 10             # optional; only applies to openrouter backend
 
 extractors:
   yt_dlp_auto_upgrade: true

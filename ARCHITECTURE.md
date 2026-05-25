@@ -42,6 +42,7 @@ Built-ins register at package import time:
 def _register_builtins() -> None:
     register_extractor(TikTokExtractor())     # specific first
     register_extractor(YouTubeExtractor())
+    register_extractor(TwitterExtractor())    # x.com, twitter.com, t.co
     register_extractor(GenericUrlExtractor()) # catch-all LAST
 
 _register_builtins()
@@ -67,6 +68,8 @@ def build_enricher(config: Config) -> Enricher:
     backend = config.enricher.backend
     if backend == "openrouter":
         return OpenRouterEnricher(...)
+    if backend == "claude-cli":
+        return ClaudeCliEnricher(...)   # summarise via `claude -p`; transcribe via whisper-svc
     if backend == "local":
         raise NotImplementedError("v1.1")
     raise ValueError(...)
@@ -141,7 +144,7 @@ export SIFT_CONFIG=~/MyVault/.config/sift.yaml
 sift add https://...
 ```
 
-Whichever location is used, the YAML's `vault:` field is the canonical vault path. `raw_dir`, `output_dir`, and `state_dir` are relative to that vault.
+Whichever location is used, the YAML's `vault:` field is the canonical vault path. `raw_dir`, `output_dir`, and `state_dir` are relative to `vault` when they are relative paths, or used as-is when absolute. Absolute paths are useful when the vault lives on iCloud Drive and you want scratch files on local disk.
 
 ## Filesystem layout (user-side)
 
@@ -176,9 +179,13 @@ The capture file always exists. The user always sees what was attempted. Re-runs
 
 ## Cost tracking
 
-Every enricher call stamps a `cost_usd` on its result. The pipeline sums these across the operations it ran (`transcribe` + `summarise` for a video; just `summarise` for an article). The total lands in frontmatter as `enrich-cost-usd: 0.0011`. Constants for per-token / per-second pricing live in `src/sift/enricher/openrouter.py` (`_STT_COST_PER_SEC` + inline summarise/caption coefficients). These will drift as OpenRouter changes pricing; refresh from OR's docs and bump them in a v0.X commit.
+Every enricher call stamps a `cost_usd` on its result. The pipeline sums these and writes the total to frontmatter as `enrich-cost-usd: 0.0001`.
 
-A future `monthly_budget_usd` knob in config (already in the schema, not yet enforced) will let users cap spending.
+- **whisper-svc transcription:** always `0.0` (local model, no API cost).
+- **claude-cli summarisation:** always `0.0` (uses Claude subscription).
+- **openrouter summarisation/caption:** calculated from token usage at model rates. Constants live in `src/sift/enricher/openrouter.py` — refresh from OpenRouter's pricing docs when models change.
+
+A `monthly_budget_usd` knob exists in the config schema but is not yet enforced.
 
 ## Adding a new extractor
 

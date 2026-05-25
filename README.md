@@ -6,40 +6,64 @@
 
 **The working bridge between social media and your second brain.**
 
-Drop a link to a TikTok, an X thread, a YouTube short, an Instagram reel, a Reddit comment — or a voice note, screenshot, PDF — into your Obsidian vault. Get a clean, transcribed, summarized markdown note back. URL in, note out. Local-first, your own AI keys, opinionated.
+Drop a link to a TikTok, an X thread, a YouTube video, or a generic article into your Obsidian vault. Get a clean, transcribed, summarized markdown note back. URL in, note out. Local-first, pluggable AI backends, opinionated.
 
 We maintain extractors for the platforms that fight scraping the hardest, so you don't have to.
 
 ## Status
 
-Pre-alpha. v0.1.1 ships:
+v0.1.2 — working daily driver.
 
-- Extraction + transcription for YouTube and TikTok (audio via yt-dlp, transcribed locally via [whisper-svc](https://github.com/carloscae/whisper-svc))
-- Extraction for generic article URLs (text)
-- Summarisation + image captioning via OpenRouter (`/chat/completions`)
-
-Roadmap → add X (video + text threads) and Instagram extractors, then a Telegram bridge.
+- **Extractors:** YouTube, TikTok, X/Twitter (video + text threads), generic articles
+- **Transcription:** local via [whisper-svc](https://github.com/carloscae/whisper-svc) (Whisper Large v3 Turbo, MLX)
+- **Summarisation:** two backends — `claude-cli` (uses your Claude subscription) or `openrouter` (OpenRouter API)
+- **Telegram bridge:** send a URL from your phone → note appears in vault automatically
 
 ## Quickstart
 
 ```bash
 pip install sift
 sift init ~/Documents/MyVault
-export OPENROUTER_API_KEY=sk-or-...
+```
+
+Pick a summarisation backend in `~/Documents/MyVault/vault-ingest.yaml`:
+
+**Option A — Claude CLI** (uses your existing Claude Code subscription, no extra API key):
+```yaml
+enricher:
+  backend: claude-cli
+  claude_cli:
+    claude_bin: /path/to/claude   # find with: which claude
+    whisper_svc_url: http://localhost:8742
+```
+
+**Option B — OpenRouter** (pay-per-token, ~$0.0001/clip with Gemini Flash Lite):
+```yaml
+enricher:
+  backend: openrouter
+  openrouter:
+    api_key_env: OPENROUTER_API_KEY
+    whisper_svc_url: http://localhost:8742
+    model_text: google/gemini-2.5-flash-lite
+    model_vision: google/gemini-2.5-flash
+```
+
+Then run:
+```bash
 sift add https://www.youtube.com/watch?v=jNQXAC9IVRw --vault ~/Documents/MyVault --now
 ```
 
 Open `~/Documents/MyVault/captures/` — your note is there with title, summary, and full transcript.
 
-**Note:** transcription requires [whisper-svc](https://github.com/carloscae/whisper-svc) running locally. Configure the endpoint in `vault-ingest.yaml` under `enricher.openrouter.whisper_svc_url`.
+**Transcription requires [whisper-svc](https://github.com/carloscae/whisper-svc) running locally.**
 
 ## Why not just use \<obvious alternative\>?
 
-Most "save to second brain" tools either stop at clipping the URL (and leave you to actually read/watch the thing later) or work only for clean articles, breaking entirely on video platforms. Sift commits to maintaining the gnarly per-platform extraction layer — the part that breaks every few weeks when TikTok rotates its anti-scrape defenses. That maintenance commitment is the differentiator.
+Most "save to second brain" tools either stop at clipping the URL or work only for clean articles. sift commits to maintaining the gnarly per-platform extraction layer — the part that breaks every few weeks when TikTok rotates its anti-scrape defenses. That maintenance commitment is the differentiator.
 
 ## Configuration
 
-See `vault-ingest.yaml.example` for a full config. Defaults work for most users.
+See `vault-ingest.yaml.example` for a full annotated config. The `raw_dir` and `state_dir` fields accept absolute paths, so you can keep scratch files outside your vault (useful for iCloud vaults).
 
 ## Architecture + roadmap
 
