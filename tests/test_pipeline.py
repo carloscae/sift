@@ -4,7 +4,7 @@ from unittest.mock import patch
 from sift.config import Config, EnricherConfig
 from sift.enricher.base import Enricher, SummaryResult, TranscriptResult
 from sift.extractors.base import ExtractFailure, ExtractResult
-from sift.pipeline import process_pending
+from sift.pipeline import ItemOutcome, ProcessResult, confirmation_for, process_pending
 from sift.queue import Queue
 
 
@@ -46,6 +46,83 @@ def test_process_pending_marks_item_processed(tmp_vault: Path):
 
     q2 = Queue(config)
     assert q2.pending_items() == []
+
+
+def test_process_pending_returns_failed_not_saved_when_extraction_fails(tmp_vault: Path):
+    """A run where the only item fails must report it failed, not saved.
+
+    Regression: process_pending used to return None, so the watcher counted
+    every drained trigger file as 'processed' regardless of per-item outcome —
+    hiding a multi-week capture outage.
+    """
+    config = Config(vault=tmp_vault)
+    q = Queue(config)
+    item_id = q.enqueue_url("https://example.com/article")
+
+    fake_failure = ExtractFailure(
+        url="https://example.com/article",
+        platform="generic",
+        error_class="unknown",
+        error_detail="(no extraction in this test)",
+    )
+    with patch("sift.pipeline.dispatch_extract", return_value=fake_failure):
+        result = process_pending(config)
+
+    assert result.failed == [item_id]
+    assert result.saved == []
+
+
+def test_process_pending_reports_saved_with_title(tmp_vault: Path):
+    """A saved item is reported in `saved` with its resolved capture title."""
+    config = Config(vault=tmp_vault)
+    q = Queue(config)
+    item_id = q.enqueue_url("https://www.youtube.com/watch?v=abc")
+
+    fake_result = ExtractResult(
+        platform="youtube",
+        media_type="audio",
+        title="Test Video",
+        metadata={"author": "ch"},
+    )
+    with patch("sift.pipeline.dispatch_extract", return_value=fake_result):
+        result = process_pending(config)
+
+    assert result.failed == []
+    assert [(o.item_id, o.title) for o in result.saved] == [(item_id, "Test Video")]
+
+
+def test_process_result_outcome_for():
+    """outcome_for distinguishes saved / failed / absent — the watcher's ✓ vs ❌ gate."""
+    result = ProcessResult(
+        saved=[ItemOutcome(item_id="a", title="Title A")],
+        failed=["b"],
+    )
+    assert result.outcome_for("a") == ("saved", "Title A")
+    assert result.outcome_for("b") == ("failed", None)
+    assert result.outcome_for("c") == ("absent", None)
+
+
+def test_confirmation_for_failed_sends_nothing():
+    """The exact regression: a failed item must not produce a success confirmation."""
+    result = ProcessResult(failed=["b"])
+    saved, message = confirmation_for("b", result, latest_title=lambda: "stale")
+    assert saved is False
+    assert message is None
+
+
+def test_confirmation_for_saved_uses_real_title():
+    result = ProcessResult(saved=[ItemOutcome(item_id="a", title="Real Title")])
+    saved, message = confirmation_for("a", result, latest_title=lambda: "stale")
+    assert saved is True
+    assert message == "✓ Real Title"
+
+
+def test_confirmation_for_absent_falls_back_to_latest():
+    """A duplicate URL captured in a prior run counts as saved, with the latest title."""
+    result = ProcessResult()
+    saved, message = confirmation_for("c", result, latest_title=lambda: "✓ latest capture")
+    assert saved is True
+    assert message == "✓ latest capture"
 
 
 def test_pipeline_calls_extractor_for_url(tmp_vault: Path):

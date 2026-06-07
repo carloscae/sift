@@ -1,10 +1,12 @@
 import json
 import os
 import shutil
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
+from pydantic import BaseModel, Field
 
 import sift.extractors  # noqa: F401 — side-effect: register built-ins
 from sift.classify import ItemKind
@@ -17,6 +19,58 @@ from sift.queue import Queue, QueueEntry
 from sift.writer import CaptureData, write_capture
 
 logger = structlog.get_logger()
+
+
+class ItemOutcome(BaseModel):
+    """A queue item that reached 'processed' and its resolved capture title."""
+
+    item_id: str
+    title: str
+
+
+class ProcessResult(BaseModel):
+    """Per-item outcome of a process_pending run.
+
+    Lets callers (the watcher) report reality: count only items that actually
+    saved, and confirm/fail per item instead of per drained trigger file.
+    """
+
+    saved: list[ItemOutcome] = Field(default_factory=list)
+    failed: list[str] = Field(default_factory=list)
+
+    def outcome_for(self, item_id: str) -> tuple[str, str | None]:
+        """Return ('saved', title) | ('failed', None) | ('absent', None).
+
+        'absent' means the item was not pending this run (e.g. a duplicate URL
+        already processed earlier), so this run neither saved nor failed it.
+        """
+        for outcome in self.saved:
+            if outcome.item_id == item_id:
+                return ("saved", outcome.title)
+        if item_id in self.failed:
+            return ("failed", None)
+        return ("absent", None)
+
+
+def confirmation_for(
+    item_id: str,
+    result: ProcessResult,
+    latest_title: Callable[[], str],
+) -> tuple[bool, str | None]:
+    """Decide a watcher trigger's outcome and its Telegram confirmation text.
+
+    Returns ``(saved, message)``. ``saved=False`` means the item failed this
+    run: the caller must route to its failure path and send NO success
+    confirmation. A 'saved' item confirms with its real captured title; an
+    'absent' item (duplicate URL captured in a prior run) counts as saved and
+    falls back to the latest-capture title.
+    """
+    status, title = result.outcome_for(item_id)
+    if status == "failed":
+        return (False, None)
+    if status == "saved" and title:
+        return (True, f"✓ {title}")
+    return (True, latest_title())
 
 _RESULT_FILE = Path(os.environ.get("SIFT_RESULT_FILE", "")) if os.environ.get("SIFT_RESULT_FILE") else None
 _BUDGET_FILE = Path.home() / ".sift" / "budget.json"
@@ -50,7 +104,7 @@ def _write_result(title: str) -> None:
         _RESULT_FILE.write_text(json.dumps({"title": title, "success": True}))
 
 
-def process_pending(config: Config) -> None:
+def process_pending(config: Config) -> ProcessResult:
     queue = Queue(config)
     queue.scan_raw()
 
@@ -74,17 +128,22 @@ def process_pending(config: Config) -> None:
         except RuntimeError as e:
             logger.warning("enricher-unavailable", error=str(e))
 
+    result = ProcessResult()
     for entry in queue.pending_items():
         try:
-            _process_one(config, entry, enricher)
+            title = _process_one(config, entry, enricher)
             queue.mark_processed(entry.id)
+            result.saved.append(ItemOutcome(item_id=entry.id, title=title))
             logger.info("processed", item_id=entry.id, source=entry.source)
         except Exception as e:
             logger.error("processing-failed", item_id=entry.id, error=str(e))
             queue.mark_failed(entry.id)
+            result.failed.append(entry.id)
+    return result
 
 
-def _process_one(config: Config, entry: QueueEntry, enricher: Enricher | None) -> None:
+def _process_one(config: Config, entry: QueueEntry, enricher: Enricher | None) -> str:
+    """Process one item end-to-end; return the resolved capture title."""
     work_dir = config.state_path / "work" / entry.id
     work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -95,16 +154,16 @@ def _process_one(config: Config, entry: QueueEntry, enricher: Enricher | None) -
                 raise RuntimeError(
                     f"extraction-failed [{result.error_class}]: {result.error_detail}"
                 )
-            _enrich_and_write(config, entry, result, enricher)
+            return _enrich_and_write(config, entry, result, enricher)
         else:
-            _enrich_file_and_write(config, entry, enricher)
+            return _enrich_file_and_write(config, entry, enricher)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def _enrich_and_write(
     config: Config, entry: QueueEntry, result: ExtractResult, enricher: Enricher | None,
-) -> None:
+) -> str:
     # Finding 15 fix: track audio location separately so audio_path always
     # points to wherever the file actually is (work_dir if move failed, dest
     # if move succeeded).  If replace() raises (e.g. disk full), we log, set
@@ -184,14 +243,16 @@ def _enrich_and_write(
     write_capture(config, data)
     if cost_usd > 0:
         _record_spend(cost_usd)
-    _write_result(data.title or data.source)
+    title = data.title or data.source
+    _write_result(title)
+    return title
 
 
 def _enrich_file_and_write(
     config: Config, entry: QueueEntry, enricher: Enricher | None,
-) -> None:
+) -> str:
     if not entry.local_path:
-        return
+        return entry.source
 
     path = Path(entry.local_path)
     cost_usd = 0.0
@@ -250,7 +311,9 @@ def _enrich_file_and_write(
     if cost_usd > 0:
         _record_spend(cost_usd)
     path.unlink(missing_ok=True)
-    _write_result(data.title or data.source)
+    title = data.title or data.source
+    _write_result(title)
+    return title
 
 
 

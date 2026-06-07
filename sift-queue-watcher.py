@@ -73,7 +73,7 @@ if __name__ == "__main__":
     LAST_RUN_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     from sift.config import load_config
-    from sift.pipeline import process_pending
+    from sift.pipeline import confirmation_for, process_pending
     from sift.queue import Queue
 
     config = load_config(Path(VAULT) / "vault-ingest.yaml")
@@ -97,13 +97,19 @@ if __name__ == "__main__":
 
         try:
             queue = Queue(config)
-            queue.enqueue_url(url)
-            process_pending(config)
+            item_id = queue.enqueue_url(url)
+            run = process_pending(config)
+            saved, msg = confirmation_for(
+                item_id, run, lambda: _latest_capture_title(config.captures_path)
+            )
+            if not saved:
+                # Item drained but did not save: fail this trigger file so the
+                # retry / dead-letter path below runs and no success is sent.
+                raise RuntimeError(f"capture did not save for {url}")
             f.unlink()
             n_processed += 1
 
-            if _bot_token and chat_id:
-                msg = _latest_capture_title(config.captures_path)
+            if _bot_token and chat_id and msg:
                 _tg_send(_bot_token, chat_id, msg)
 
         except Exception as e:
