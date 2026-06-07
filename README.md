@@ -12,7 +12,7 @@ We maintain extractors for the platforms that fight scraping the hardest, so you
 
 ## Status
 
-v0.1.2 — working daily driver.
+v0.2.0 — working daily driver.
 
 - **Extractors:** YouTube, TikTok, X/Twitter (video + text threads), generic articles
 - **Transcription:** local via [whisper-svc](https://github.com/carloscae/whisper-svc) (Whisper Large v3 Turbo, MLX)
@@ -61,9 +61,36 @@ Open `~/Documents/MyVault/captures/` — your note is there with title, summary,
 
 Most "save to second brain" tools either stop at clipping the URL or work only for clean articles. sift commits to maintaining the gnarly per-platform extraction layer — the part that breaks every few weeks when TikTok rotates its anti-scrape defenses. That maintenance commitment is the differentiator.
 
+## sift status
+
+```
+$ sift status
+2 pending
+  • [URL] https://www.youtube.com/watch?v=abc123
+  • [URL] https://x.com/user/status/456
+Last run: 2026-05-26T08:14:03+00:00 (4.2s) — 1 processed, 0 failed, 0 dead-lettered
+```
+
+The last-run data is read from `~/.sift/last-run.json`, written by `sift-queue-watcher.py` after each drain. If you use `sift run` directly (no watcher), this file is not written.
+
 ## Configuration
 
 See `vault-ingest.yaml.example` for a full annotated config. The `raw_dir` and `state_dir` fields accept absolute paths, so you can keep scratch files outside your vault (useful for iCloud vaults).
+
+Key options:
+
+```yaml
+enricher:
+  backend: openrouter         # openrouter | claude-cli | local
+  monthly_budget_usd: 10      # optional; caps total openrouter spend per calendar month
+```
+
+`monthly_budget_usd` is enforced at run time: if the month's spend (tracked in `~/.sift/budget.json`) meets or exceeds the cap, the enricher is skipped for that batch. Items are still written to `captures/` but without transcript or summary.
+
+## Log and dead-letter locations
+
+- **Watcher log:** `~/Library/Logs/sift/watcher.log`
+- **Dead-letter queue:** `~/.sift-queue.d/.dead/` — items moved here after 3 consecutive failures. Inspect the JSON for the error, fix the cause, then re-add the URL with `sift add <url>`.
 
 ## Architecture + roadmap
 

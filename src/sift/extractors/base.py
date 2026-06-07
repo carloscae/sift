@@ -1,3 +1,4 @@
+import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Literal
@@ -60,3 +61,19 @@ def all_extractors() -> list[Extractor]:
 def clear_registry() -> None:
     """Drop all registered extractors. For test isolation."""
     _REGISTRY.clear()
+
+
+def resolve_ffmpeg_location() -> str | None:
+    """Directory containing ffmpeg/ffprobe, or None if not found.
+
+    yt-dlp's FFmpegExtractAudio postprocessor locates ffmpeg via PATH. Under
+    launchd and other minimal-PATH supervisors, /opt/homebrew/bin is absent
+    from PATH, so resolve it explicitly and pass ffmpeg_location to yt-dlp.
+    """
+    found = shutil.which("ffmpeg")
+    if found:
+        return str(Path(found).parent)
+    for candidate in ("/opt/homebrew/bin", "/usr/local/bin"):
+        if (Path(candidate) / "ffmpeg").is_file():
+            return candidate
+    return None

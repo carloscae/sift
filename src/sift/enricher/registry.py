@@ -20,12 +20,14 @@ def build_enricher(config: Config) -> Enricher:
             model_text=or_cfg.model_text,
             model_vision=or_cfg.model_vision,
             whisper_svc_url=or_cfg.whisper_svc_url,
+            user_context=config.enricher.user_context,
         )
     if backend == "claude-cli":
         cli_cfg = config.enricher.claude_cli
         return ClaudeCliEnricher(
             claude_bin=cli_cfg.claude_bin,
             whisper_svc_url=cli_cfg.whisper_svc_url,
+            user_context=config.enricher.user_context,
         )
     if backend == "local":
         raise NotImplementedError("local enricher backend not yet implemented (v1.1)")

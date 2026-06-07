@@ -39,12 +39,14 @@ class OpenRouterEnricher(Enricher):
         model_text: str,
         model_vision: str,
         whisper_svc_url: str = "http://localhost:8742",
+        user_context: str | None = None,
         client: httpx.Client | None = None,
     ):
         self.api_key = api_key
         self.model_text = model_text
         self.model_vision = model_vision
         self.whisper_svc_url = whisper_svc_url.rstrip("/")
+        self.user_context = user_context
         self._client = client or httpx.Client(timeout=120.0)
 
     def _headers(self) -> dict:
@@ -109,27 +111,46 @@ class OpenRouterEnricher(Enricher):
         _raise_with_body(resp, "/chat/completions")
         body = resp.json()
         content = body["choices"][0]["message"]["content"]
-        data = json.loads(content)
+        raw = content.strip()
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            raw = "\n".join(lines[1:])  # drop opening fence
+            if raw.endswith("```"):
+                raw = raw[:raw.rfind("```")]
+        data = json.loads(raw.strip())
 
         usage = body.get("usage", {})
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-        cost = (prompt_tokens * 0.00000030) + (completion_tokens * 0.00000250)
+        cost_usd = usage.get("cost")
+        if cost_usd is None:
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            cost_usd = (prompt_tokens * 0.00000030) + (completion_tokens * 0.00000250)
 
         return CaptionResult(
             caption=data.get("caption", ""),
             ocr_text=data.get("ocr_text", ""),
             tags=[t.lower() for t in data.get("tags", [])][:5],
             model=self.model_vision,
-            cost_usd=round(cost, 6),
+            cost_usd=round(cost_usd, 6),
         )
 
     def summarise(self, text: str, context: dict | None = None) -> SummaryResult:
+        user_ctx_block = (
+            f"\n\nReader context (use to personalise relevance judgments):\n{self.user_context}"
+            if self.user_context else ""
+        )
         system_prompt = (
-            "You receive transcribed audio or extracted text. "
-            "Produce a JSON object with keys: title (string, <=80 chars), "
-            "summary (2-3 sentence string), tags (array of 2-5 lowercase string tags). "
-            "Return ONLY the JSON, no prose."
+            "You receive text from a web capture (article, tweet thread, video transcript, etc). "
+            "Analyze it critically and return ONLY a JSON object with keys: "
+            "title (string, <=80 chars), "
+            "summary (markdown-formatted string using this exact structure: "
+            "one sentence verdict (credibility and/or usefulness, direct, no hedging). "
+            "Then: **Worth knowing:** followed by 2-4 bullet points of genuinely useful or accurate points "
+            "with enough specific detail to be actionable in a future conversation without re-reading the source; "
+            "if reader context is provided flag relevance to their specific workflows. "
+            "Then: **Weak:** one sentence on what is inaccurate, hyped, fabricated, or missing — omit if nothing is weak), "
+            "tags (array of 2-5 lowercase strings). "
+            f"Return ONLY the JSON, no prose.{user_ctx_block}"
         )
         ctx = context or {}
         user_prompt = (
@@ -154,17 +175,25 @@ class OpenRouterEnricher(Enricher):
         _raise_with_body(resp, "/chat/completions")
         body = resp.json()
         content = body["choices"][0]["message"]["content"]
-        data = json.loads(content)
+        raw = content.strip()
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            raw = "\n".join(lines[1:])  # drop opening fence
+            if raw.endswith("```"):
+                raw = raw[:raw.rfind("```")]
+        data = json.loads(raw.strip())
 
         usage = body.get("usage", {})
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-        cost = (prompt_tokens * 0.00000010) + (completion_tokens * 0.00000040)
+        cost_usd = usage.get("cost")
+        if cost_usd is None:
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            cost_usd = (prompt_tokens * 0.00000010) + (completion_tokens * 0.00000040)
 
         return SummaryResult(
             title=data.get("title", "Untitled")[:80],
             summary=data.get("summary", ""),
             tags=[t.lower() for t in data.get("tags", [])][:5],
             model=self.model_text,
-            cost_usd=round(cost, 6),
+            cost_usd=round(cost_usd, 6),
         )

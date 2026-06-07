@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -17,10 +18,11 @@ class ClaudeCliConfig(BaseModel):
 
 
 class EnricherConfig(BaseModel):
-    backend: str = "openrouter"
+    backend: Literal["openrouter", "claude-cli", "local"] = "openrouter"
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     claude_cli: ClaudeCliConfig = Field(default_factory=ClaudeCliConfig)
     monthly_budget_usd: float | None = None
+    user_context: str | None = None
 
 
 class Config(BaseModel):
@@ -28,7 +30,7 @@ class Config(BaseModel):
     raw_dir: str = "raw"
     output_dir: str = "captures"
     state_dir: str = ".vault-ingest"
-    raw_ttl_days: int = 7
+    timezone: str = "UTC"
     enricher: EnricherConfig = Field(default_factory=EnricherConfig)
     private_caption_keywords: list[str] = Field(
         default_factory=lambda: ["private", "internal", "confidential"]

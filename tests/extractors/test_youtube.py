@@ -27,7 +27,7 @@ def test_extract_calls_ytdlp_and_returns_result(tmp_path: Path):
         "id": "abc123",
     }
 
-    with patch("sift.extractors.youtube.YoutubeDL") as mock_ydl_cls:
+    with patch("sift.extractors.ytdlp_base.YoutubeDL") as mock_ydl_cls:
         mock_ydl = MagicMock()
         mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
         mock_ydl.extract_info.return_value = fake_info
@@ -39,5 +39,5 @@ def test_extract_calls_ytdlp_and_returns_result(tmp_path: Path):
     assert result.media_type == "audio"
     assert result.title == "Test Video"
     assert result.metadata["author"] == "test-channel"
-    assert result.metadata["duration"] == 42
+    assert result.metadata["video_id"] == "abc123"
     assert result.media_path is not None

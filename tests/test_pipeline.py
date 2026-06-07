@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from sift.config import Config
+from sift.config import Config, EnricherConfig
 from sift.enricher.base import Enricher, SummaryResult, TranscriptResult
 from sift.extractors.base import ExtractFailure, ExtractResult
 from sift.pipeline import process_pending
@@ -25,8 +25,9 @@ def test_process_pending_marks_failed_for_url(tmp_vault: Path):
     # No stub written to captures — failures go to queue state only
     captures = list(config.captures_path.glob("*.md"))
     assert len(captures) == 0
-    state = q._load()
-    assert any("example.com" in str(e.source) for e in state.failed.values())
+    q2 = Queue(config)
+    failed_sources = [e.source for e in q2.failed_items()]
+    assert any("example.com" in s for s in failed_sources)
 
 
 def test_process_pending_marks_item_processed(tmp_vault: Path):
@@ -87,6 +88,31 @@ class _FakeEnricher(Enricher):
         )
 
 
+def test_budget_exceeded_skips_enricher(tmp_vault: Path):
+    """When monthly spend exceeds the configured budget, enricher must be None."""
+    enricher_cfg = EnricherConfig(monthly_budget_usd=1.00)
+    config = Config(vault=tmp_vault, enricher=enricher_cfg)
+
+    q = Queue(config)
+    q.enqueue_url("https://example.com/article")
+
+    fake_failure = ExtractFailure(
+        url="https://example.com/article",
+        platform="generic",
+        error_class="unknown",
+        error_detail="(no extraction in this test)",
+    )
+
+    # Simulate spend already above budget (e.g. $1.50 spent, $1.00 limit)
+    with patch("sift.pipeline._load_monthly_spend", return_value=1.50), \
+         patch("sift.pipeline.build_enricher") as mock_build, \
+         patch("sift.pipeline.dispatch_extract", return_value=fake_failure):
+        process_pending(config)
+
+    # build_enricher must never have been called — budget guard short-circuits it
+    mock_build.assert_not_called()
+
+
 def test_pipeline_enriches_audio_url(tmp_vault: Path):
     config = Config(vault=tmp_vault)
     q = Queue(config)
@@ -116,4 +142,4 @@ def test_pipeline_enriches_audio_url(tmp_vault: Path):
     assert "A 2-3 sentence summary." in content
     assert "Full transcript text." in content
     assert "status: raw" in content
-    assert "enrich-cost-usd: 0.0011" in content
+    assert "enrich-cost-usd" not in content

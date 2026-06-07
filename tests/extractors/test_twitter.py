@@ -18,16 +18,27 @@ def test_can_handle_twitter_hosts():
 
 def test_extract_video_tweet(tmp_path: Path):
     e = TwitterExtractor()
+    fake_fx_response = {
+        "tweet": {
+            "text": "A video tweet",
+            "author": {"name": "Tweeter", "screen_name": "tweeter"},
+            "media": {"videos": [{"url": "https://video.example.com/clip.mp4"}]},
+        }
+    }
     fake_info = {
         "title": "A video tweet",
         "uploader": "@tweeter",
         "id": "1234567890",
         "description": "desc",
     }
-    with patch("sift.extractors.twitter.YoutubeDL") as mock_ydl_cls:
-        mock_ydl_cls.return_value.__enter__.return_value.extract_info.return_value = fake_info
-        (tmp_path / "1234567890.mp3").write_bytes(b"audio")
-        result = e.extract("https://x.com/user/status/1234567890", tmp_path)
+    with patch("sift.extractors.twitter.httpx.get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = fake_fx_response
+        mock_get.return_value = mock_resp
+        with patch("sift.extractors.twitter.YoutubeDL") as mock_ydl_cls:
+            mock_ydl_cls.return_value.__enter__.return_value.extract_info.return_value = fake_info
+            (tmp_path / "1234567890.mp3").write_bytes(b"audio")
+            result = e.extract("https://x.com/user/status/1234567890", tmp_path)
 
     assert result.platform == "twitter"
     assert result.media_type == "audio"

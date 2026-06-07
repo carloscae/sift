@@ -9,7 +9,7 @@ logger = structlog.get_logger()
 
 
 def dispatch_extract(url: str, work_dir: Path) -> ExtractResult | ExtractFailure:
-    hostname = urlparse(url).netloc.lower()
+    hostname = urlparse(url).hostname or ""
     extractor = get_extractor(hostname)
     if extractor is None:
         return ExtractFailure(

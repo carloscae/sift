@@ -70,7 +70,7 @@ def test_add_uses_config_flag(tmp_path: Path):
     )
     assert result.exit_code == 0, result.output
     # Queue file should be created based on vault from the custom config.
-    assert (vault / ".vault-ingest" / "queue.json").is_file()
+    assert (vault / ".vault-ingest" / "queue.db").is_file()
 
 
 def test_add_uses_sift_config_env(tmp_path: Path, monkeypatch):
@@ -84,7 +84,7 @@ def test_add_uses_sift_config_env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SIFT_CONFIG", str(custom_config))
     result = runner.invoke(main, ["add", "https://example.com/foo"])
     assert result.exit_code == 0, result.output
-    assert (vault / ".vault-ingest" / "queue.json").is_file()
+    assert (vault / ".vault-ingest" / "queue.db").is_file()
 
 
 def test_add_now_does_not_claim_processed_specific_item(tmp_path: Path):

@@ -16,7 +16,7 @@ def test_extract_returns_result(tmp_path: Path):
     e = TikTokExtractor()
     fake_info = {"title": "TikTok clip", "uploader": "@user", "id": "1234", "duration": 30}
 
-    with patch("sift.extractors.tiktok.YoutubeDL") as mock_ydl_cls:
+    with patch("sift.extractors.ytdlp_base.YoutubeDL") as mock_ydl_cls:
         mock_ydl_cls.return_value.__enter__.return_value.extract_info.return_value = fake_info
         (tmp_path / "1234.mp3").write_bytes(b"audio")
         result = e.extract("https://www.tiktok.com/@user/video/1234", tmp_path)
@@ -28,7 +28,7 @@ def test_extract_returns_result(tmp_path: Path):
 
 def test_extract_anti_scrape_raises(tmp_path: Path):
     e = TikTokExtractor()
-    with patch("sift.extractors.tiktok.YoutubeDL") as mock_ydl_cls:
+    with patch("sift.extractors.ytdlp_base.YoutubeDL") as mock_ydl_cls:
         mock_ydl_cls.return_value.__enter__.return_value.extract_info.side_effect = (
             Exception("Unable to extract: anti-scrape protection")
         )

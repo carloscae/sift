@@ -2,6 +2,24 @@
 
 `sift` is a four-stage pipeline with two pluggable registries. Each stage has one responsibility and a typed contract with the next.
 
+## Data flow
+
+```
+Telegram bot → ~/.sift-queue.d/*.json → sift-queue-watcher.py (in-process)
+                                              ↓
+                                       SQLite queue (queue.db)
+                                              ↓
+                               pipeline.py (process_pending)
+                                    ↙         ↘
+                             extract         enrich
+                                    ↘         ↙
+                                      write
+                                        ↓
+                                  captures/*.md
+```
+
+For direct CLI use: `sift add <url> --now` skips the file-drop step and runs the pipeline in-process.
+
 ## Pipeline
 
 ```
@@ -10,13 +28,13 @@ classify  →  queue  →  extract  →  enrich  →  write
 
 1. **Classify** (`src/sift/classify.py`). Detect what kind of thing came in. URL? Audio file? Image? PDF? URLs get a `platform` label from hostname (tiktok, youtube, instagram, x, reddit, bluesky, generic). Files get a `kind` from extension. Returns an `Item`.
 
-2. **Queue** (`src/sift/queue.py`). Persist intent. Adding a URL or file produces an entry with a stable SHA256-prefix ID. State lives at `<vault>/.vault-ingest/queue.json` and has three buckets: `pending`, `processed`, `failed`. The queue also scans `<vault>/raw/` for files dropped externally (shortcuts, Telegram bridge, manual drag-and-drop).
+2. **Queue** (`src/sift/queue.py`). Persist intent in SQLite (WAL mode). Adding a URL produces an entry with a stable SHA256-prefix ID derived from the *normalized* URL (tracking params stripped, youtu.be resolved, x.com canonicalized to twitter.com). State lives at `<state_dir>/queue.db`. Three statuses: `pending`, `processed`, `failed`. Auto-prunes processed/failed rows older than 30 days on every instantiation. The queue also scans `<vault>/raw/` for files dropped externally (shortcuts, Telegram bridge, manual drag-and-drop).
 
-3. **Extract** (`src/sift/extractors/`). For URL items, route to the right extractor by hostname and produce an `ExtractResult` (downloaded media path + metadata) or an `ExtractFailure` (typed error class + diagnostic text + suggested user fallback). Three built-ins ship in v0.1.0: YouTube (yt-dlp), TikTok (yt-dlp), and a generic article extractor (httpx + readability-lxml). File items skip extraction.
+3. **Extract** (`src/sift/extractors/`). For URL items, route to the right extractor by hostname and produce an `ExtractResult` (downloaded media path + metadata) or an `ExtractFailure` (typed error class + diagnostic text + suggested user fallback). Four built-ins ship: YouTube (yt-dlp), TikTok (yt-dlp), Twitter/X, and a generic article extractor (httpx + readability-lxml). File items skip extraction.
 
-4. **Enrich** (`src/sift/enricher/`). Audio gets transcribed. Text gets summarised. Images get captioned + OCR'd. All three operations return a typed result with `cost_usd` stamped, so the writer can record what each capture cost. Backend abstraction lets v1.1 swap in a local model that runs fully offline.
+4. **Enrich** (`src/sift/enricher/`). Audio gets transcribed via whisper-svc. Text gets summarised. Images get captioned + OCR'd. All operations return a typed result with `cost_usd` stamped, so the writer can record what each capture cost. Monthly budget is enforced before enrichment starts (checked against `~/.sift/budget.json`). If the budget is exceeded, the enricher is not instantiated and items are written without enrichment.
 
-5. **Write** (`src/sift/writer.py`). Emit `captures/{YYYY-MM-DD}-{slug}-{item_id[:6]}.md` with YAML frontmatter and a markdown body. Frontmatter captures source, platform, ingestion version (`sift@{__version__}`), enrichment metadata, and cost.
+5. **Write** (`src/sift/writer.py`). Emit `captures/{YYYY-MM-DD}-{slug}-{item_id[:6]}.md` with YAML frontmatter and a markdown body. Frontmatter captures source, platform, ingestion version (`sift@{__version__}`), enrichment metadata, cost, and the backend that produced the enrichment (`enriched_by: openrouter` or `enriched_by: claude-cli`).
 
 The orchestrator (`src/sift/pipeline.py`) ties the stages together. It catches exceptions per-item and routes them to `mark_failed`, so one bad URL doesn't sink the batch.
 
@@ -58,6 +76,21 @@ import sift.extractors  # noqa: F401 — registers built-in extractors
 
 Test isolation: `tests/conftest.py` has an autouse fixture that calls `clear_registry()` before each test, preventing module-level state from leaking.
 
+### Extractor class hierarchy
+
+```
+Extractor (ABC)
+├── YtDlpAudioExtractor   src/sift/extractors/ytdlp_base.py
+│   ├── YouTubeExtractor  src/sift/extractors/youtube.py
+│   └── TikTokExtractor   src/sift/extractors/tiktok.py
+├── TwitterExtractor      src/sift/extractors/twitter.py  (independent)
+└── GenericUrlExtractor   src/sift/extractors/generic_url.py  (independent)
+```
+
+`YtDlpAudioExtractor` is the shared base for platforms that yield audio via yt-dlp. It owns the yt-dlp options, the ffmpeg post-processor config, and the `can_handle` pattern (`self._HOSTS` set). Subclasses only need to declare `platform` and `_HOSTS`.
+
+`TwitterExtractor` is independent because its extraction strategy is more complex: fxtwitter API first (fast, no auth), yt-dlp only for video tweets, Playwright for `x.com/i/article/` URLs. Playwright is a soft dependency — a clear `RuntimeError` is raised if it's not installed.
+
 ### Enricher registry
 
 Simpler: a single factory function.
@@ -65,7 +98,7 @@ Simpler: a single factory function.
 ```python
 # src/sift/enricher/registry.py
 def build_enricher(config: Config) -> Enricher:
-    backend = config.enricher.backend
+    backend = config.enricher.backend  # Literal["openrouter", "claude-cli", "local"]
     if backend == "openrouter":
         return OpenRouterEnricher(...)
     if backend == "claude-cli":
@@ -75,7 +108,7 @@ def build_enricher(config: Config) -> Enricher:
     raise ValueError(...)
 ```
 
-The pipeline calls `build_enricher(config)` once per `process_pending` run and reuses the instance.
+The `backend` field is `Literal["openrouter", "claude-cli", "local"]` — typos are caught at config load time by Pydantic. The pipeline calls `build_enricher(config)` once per `process_pending` run and reuses the instance.
 
 ## Data contracts
 
@@ -91,7 +124,7 @@ class Item(BaseModel):
 
 # Queue persistence
 class QueueEntry(BaseModel):
-    id: str                   # sha256(source)[:12]
+    id: str                   # sha256(normalized_source)[:12]
     source: str
     kind: str
     platform: str | None
@@ -105,7 +138,7 @@ class ExtractResult(BaseModel):
     media_path: Path | None   # downloaded media, moves to vault/raw/
     text_content: str | None  # for article extractors
     title: str
-    metadata: dict
+    metadata: dict            # may include extraction_warning for degraded results
     cost_usd: float
 
 class ExtractFailure(BaseModel):
@@ -128,6 +161,36 @@ class CaptureData(BaseModel):
     transcript_or_ocr, tags, enriched_by, cost_usd, models, raw_file
 ```
 
+## Persistence layout
+
+```
+~/.sift/
+├── budget.json       # monthly enrichment spend, keyed by YYYY-MM
+├── last-run.json     # written by sift-queue-watcher after each drain
+│                     # {timestamp, processed, failed, dead_lettered, duration_sec}
+└── .env              # optional; injected into watcher process env
+
+~/.sift-queue.d/
+├── <uuid>.json       # pending items written by Telegram bot
+└── .dead/
+    └── <uuid>.json   # dead-lettered after MAX_RETRIES=3 failures
+
+~/Library/Logs/sift/
+└── watcher.log       # LaunchAgent stdout/stderr
+
+<vault>/
+├── vault-ingest.yaml
+├── raw/              # downloaded media (7-day TTL, configurable)
+│   └── <item-id>-<filename>.mp3
+├── captures/         # produced markdown notes
+│   └── 2026-05-19-some-title-abc123.md
+└── .vault-ingest/
+    ├── queue.db      # SQLite WAL; pending/processed/failed rows
+    └── work/         # scratch space, cleaned after each item
+```
+
+For iCloud vaults: `raw_dir` and `state_dir` accept absolute paths so scratch files can stay on local disk outside iCloud Drive.
+
 ## Config file resolution
 
 sift looks for the config file in this order:
@@ -136,60 +199,37 @@ sift looks for the config file in this order:
 2. `$SIFT_CONFIG` environment variable
 3. `<vault>/vault-ingest.yaml` where `<vault>` comes from `--vault`, `$SIFT_VAULT`, or the current working directory.
 
-This lets users who want a clean vault root (e.g. Obsidian users where root visibility matters) keep the config in a hidden sub-folder:
+## Budget guard
 
-```bash
-sift init ~/MyVault --config ~/MyVault/.config/sift.yaml
-export SIFT_CONFIG=~/MyVault/.config/sift.yaml
-sift add https://...
-```
+When `monthly_budget_usd` is set in config, `process_pending` reads `~/.sift/budget.json` before building the enricher. If the current month's spend meets or exceeds the cap, the enricher is not instantiated and all items in the batch are written without enrichment (note is saved, but no transcript or summary). After each item, spend is accumulated back to `budget.json`.
 
-Whichever location is used, the YAML's `vault:` field is the canonical vault path. `raw_dir`, `output_dir`, and `state_dir` are relative to `vault` when they are relative paths, or used as-is when absolute. Absolute paths are useful when the vault lives on iCloud Drive and you want scratch files on local disk.
-
-## Filesystem layout (user-side)
-
-For a vault at `~/MyVault`:
-
-```
-~/MyVault/
-├── vault-ingest.yaml          # config (written by `sift init`)
-├── raw/                       # downloaded media + user-dropped files
-│   └── <item-id>-<filename>.mp3
-├── captures/                  # produced markdown notes
-│   └── 2026-05-19-some-title-abc123.md
-└── .vault-ingest/             # internal state (gitignored by users)
-    ├── queue.json             # pending/processed/failed lookup
-    └── work/                  # scratch space, cleaned after each item
-```
-
-`raw/` files have a 7-day TTL (configurable via `raw_ttl_days`). Capture notes never expire; the user owns them.
+The budget only applies to API-cost backends (`openrouter`). `claude-cli` and future `local` backends always report `cost_usd=0.0`.
 
 ## Failure path
 
 ```
 URL → dispatch_extract → ExtractFailure
                               ↓
-                  _write_failure_stub
+                  queue.mark_failed(item_id)
                               ↓
-        captures/<date>-extraction-failed-<id>.md
-        (subtype: url-failed, status: pending-enrichment)
+               (no capture file written for extraction failures)
 ```
 
-The capture file always exists. The user always sees what was attempted. Re-runs can pick up the failed item later when the underlying platform or extractor is fixed.
+For watcher-driven runs: after `MAX_RETRIES=3` failures on the same `.sift-queue.d/*.json` file, the watcher moves it to `~/.sift-queue.d/.dead/` and sends a Telegram notification. The SQLite queue entry remains `failed` and can be retried via `sift add <url>`.
 
 ## Cost tracking
 
-Every enricher call stamps a `cost_usd` on its result. The pipeline sums these and writes the total to frontmatter as `enrich-cost-usd: 0.0001`.
+Every enricher call stamps a `cost_usd` on its result. The pipeline sums these and writes the total to frontmatter as `enrich-cost-usd: 0.0001`. Spend is also accumulated to `~/.sift/budget.json` for the monthly cap.
 
 - **whisper-svc transcription:** always `0.0` (local model, no API cost).
 - **claude-cli summarisation:** always `0.0` (uses Claude subscription).
-- **openrouter summarisation/caption:** calculated from token usage at model rates. Constants live in `src/sift/enricher/openrouter.py` — refresh from OpenRouter's pricing docs when models change.
+- **openrouter summarisation/caption:** calculated from token usage at model rates. Constants live in `src/sift/enricher/openrouter.py`.
 
-A `monthly_budget_usd` knob exists in the config schema but is not yet enforced.
+The `enriched_by` field in capture frontmatter records the actual backend (`openrouter` or `claude-cli`), not a hardcoded string.
 
 ## Adding a new extractor
 
-1. Create `src/sift/extractors/<platform>.py` with a class inheriting `Extractor`.
+1. Create `src/sift/extractors/<platform>.py` with a class inheriting `Extractor` (or `YtDlpAudioExtractor` if it's an audio platform served by yt-dlp).
 2. Implement `can_handle(hostname)` and `extract(url, work_dir) -> ExtractResult`.
 3. Raise on failure; the dispatcher wraps exceptions in `ExtractFailure`.
 4. Register it in `src/sift/extractors/__init__.py::_register_builtins`, **before** `GenericUrlExtractor`.
@@ -201,15 +241,15 @@ A `monthly_budget_usd` knob exists in the config schema but is not yet enforced.
 1. Create `src/sift/enricher/<backend>.py` with a class inheriting `Enricher`.
 2. Implement `transcribe`, `caption`, `summarise`. Return the corresponding `Result` types with `cost_usd` populated.
 3. Add a branch in `src/sift/enricher/registry.py::build_enricher`.
-4. Extend `sift/config.py` with any backend-specific config (nested under `EnricherConfig`).
-5. Tests in `tests/enricher/test_<backend>.py`.
+4. Add the backend name to the `Literal` type in `EnricherConfig.backend` in `src/sift/config.py`.
+5. Extend `EnricherConfig` with any backend-specific config (nested model).
+6. Tests in `tests/enricher/test_<backend>.py`.
 
-The local-model backend (v1.1) will live at `src/sift/enricher/local.py`.
+## Known design trade-offs
 
-## Known design trade-offs (worth knowing if you're refactoring)
-
-- **The extractor registry is a module-level global.** Could be a `Pipeline.with_extractors(...)` builder; intentionally avoided for v0.1.0 because the global keeps the API surface smaller. If multi-tenancy ever matters, replace it.
-- **Side-effect imports trigger registration.** Acceptable but unusual. Test isolation works because of the autouse `clear_registry` fixture. Subtle for new contributors.
-- **`httpx.Client` is synchronous.** Fine for a personal CLI; will need `AsyncClient` once an HTTP-endpoint mode lands (Phase 7).
-- **Queue has no per-step status.** A failure currently marks the whole item failed, losing the partial success of "extraction worked, enrichment didn't." For retry sanity in Phase 6+, the `QueueEntry` will probably grow a `stage_status` field.
-- **No backpressure / batching.** `process_pending` processes everything in the pending bucket sequentially. A 200-item backlog will hammer OpenRouter. v0.4.0 + will add a rate-limit + budget guard.
+- **The extractor registry is a module-level global.** Could be a `Pipeline.with_extractors(...)` builder; intentionally avoided for v0.1.0 because the global keeps the API surface smaller.
+- **Side-effect imports trigger registration.** Acceptable but unusual. Test isolation works because of the autouse `clear_registry` fixture.
+- **`httpx.Client` is synchronous.** Fine for a personal CLI; will need `AsyncClient` once an HTTP-endpoint mode lands.
+- **Queue has no per-step status.** A failure marks the whole item failed, losing the partial success of "extraction worked, enrichment didn't." A `stage_status` field on `QueueEntry` is planned for v0.3.0.
+- **No backpressure / batching.** `process_pending` processes everything in the pending bucket sequentially.
+- **Playwright is a soft dependency.** Only required for `x.com/i/article/` URLs. Missing Playwright produces a clear error message rather than an import error at startup.

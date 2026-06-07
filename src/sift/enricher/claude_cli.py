@@ -11,13 +11,27 @@ from sift.enricher.base import CaptionResult, Enricher, SummaryResult, Transcrip
 logger = structlog.get_logger()
 
 _SUMMARISE_PROMPT = """\
-You receive transcribed audio or extracted text from a web capture.
-Return ONLY a JSON object with these keys:
+You receive text from a web capture (article, tweet thread, video transcript, etc).
+Analyze it critically and return ONLY a JSON object with these keys:
 - title: string, <=80 chars, descriptive headline
-- summary: string, 2-3 sentences
+- summary: string, markdown-formatted analysis using this exact structure:
+    One sentence verdict (credibility, usefulness, or both). Direct and opinionated — no hedging.
+
+    **Worth knowing:**
+    - 2-4 bullets of genuinely useful or accurate points with enough specific detail to be actionable \
+in a future conversation without re-reading the source. If reader context is provided, flag relevance to \
+their specific workflows.
+
+    **Weak:** one sentence on what is inaccurate, hyped, fabricated, or missing. Omit if nothing is weak.
 - tags: array of 2-5 lowercase strings
 
-No prose, no markdown, just the JSON object."""
+No prose outside the JSON, just the JSON object."""
+
+
+def _build_prompt(user_context: str | None) -> str:
+    if not user_context:
+        return _SUMMARISE_PROMPT
+    return _SUMMARISE_PROMPT + f"\n\nReader context (use to personalise relevance judgments):\n{user_context}"
 
 
 class ClaudeCliEnricher(Enricher):
@@ -25,11 +39,13 @@ class ClaudeCliEnricher(Enricher):
         self,
         claude_bin: str = "claude",
         whisper_svc_url: str = "http://localhost:8742",
+        user_context: str | None = None,
         client: httpx.Client | None = None,
     ):
         resolved = shutil.which(claude_bin) or claude_bin
         self.claude_bin = resolved
         self.whisper_svc_url = whisper_svc_url.rstrip("/")
+        self._prompt = _build_prompt(user_context)
         self._client = client or httpx.Client(timeout=120.0)
 
     def transcribe(self, audio_path: Path) -> TranscriptResult:
@@ -59,18 +75,18 @@ class ClaudeCliEnricher(Enricher):
             f"Platform: {ctx.get('platform', 'unknown')}\n\n"
             f"Content:\n{text[:8000]}"
         )
-        prompt = f"{_SUMMARISE_PROMPT}\n\n{user_content}"
+        prompt = f"{self._prompt}\n\n{user_content}"
 
         result = subprocess.run(
-            [self.claude_bin, "-p", prompt],
+            [self.claude_bin, "-p"],
+            input=prompt.encode(),
             capture_output=True,
-            text=True,
             timeout=60,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"claude CLI exited {result.returncode}: {result.stderr[:300]}")
+            raise RuntimeError(f"claude CLI exited {result.returncode}: {result.stderr.decode(errors='replace')[:300]}")
 
-        raw = result.stdout.strip()
+        raw = result.stdout.decode().strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = "\n".join(raw.splitlines()[1:])

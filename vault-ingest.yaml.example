@@ -7,7 +7,7 @@
 vault: ~/Documents/MyVault           # absolute path to vault root
 raw_dir: raw                         # relative to vault, or absolute path
 output_dir: captures                 # relative to vault, or absolute path
-state_dir: .vault-ingest             # relative to vault, or absolute path; holds queue.json
+state_dir: .vault-ingest             # relative to vault, or absolute path; holds queue.db
 raw_ttl_days: 7                      # raw files older than this are deleted on next run
 
 # Tip: if your vault is on iCloud Drive, use absolute paths for raw_dir and state_dir

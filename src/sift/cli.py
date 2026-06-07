@@ -138,12 +138,31 @@ def run(upgrade_extractors: bool, vault: str | None, config_path: str | None) ->
 @_config_option
 def status(vault: str | None, config_path: str | None) -> None:
     """Show queue status."""
+    import json as _json
+
     config = _resolve_config(vault, config_path)
     queue = Queue(config)
     pending = queue.pending_items()
     click.echo(f"{len(pending)} pending")
     for entry in pending:
         click.echo(f"  • [{entry.kind}] {entry.source}")
+
+    last_run_file = Path.home() / ".sift" / "last-run.json"
+    if last_run_file.exists():
+        try:
+            lr = _json.loads(last_run_file.read_text())
+            ts = lr.get("timestamp", "?")
+            dur = lr.get("duration_sec", "?")
+            proc = lr.get("processed", 0)
+            fail = lr.get("failed", 0)
+            dead = lr.get("dead_lettered", 0)
+            click.echo(
+                f"Last run: {ts} ({dur}s) — {proc} processed, {fail} failed, {dead} dead-lettered"
+            )
+        except Exception:
+            click.echo("Last run: (unreadable)")
+    else:
+        click.echo("Last run: never")
 
 
 def _default_config(vault: Path) -> str:
@@ -152,7 +171,6 @@ def _default_config(vault: Path) -> str:
         "raw_dir: raw\n"
         "output_dir: captures\n"
         "state_dir: .vault-ingest\n"
-        "raw_ttl_days: 7\n"
         "\n"
         "enricher:\n"
         "  backend: openrouter\n"

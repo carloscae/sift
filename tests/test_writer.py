@@ -31,9 +31,12 @@ def test_writes_markdown_with_frontmatter(tmp_vault: Path):
     assert "platform: tiktok" in content
     assert "source: https://tiktok.com/foo" in content
     assert "status: raw" in content
-    assert "enrich-cost-usd: 0.0006" in content
+    assert "enrich-cost-usd" not in content
+    assert "enriched-by" not in content
     assert "# Some title" in content
+    assert "## Analysis" in content
     assert "A short summary." in content
+    assert "## Transcript" in content
     assert "The full transcript text." in content
 
 
