@@ -1,0 +1,22 @@
+{
+  "permissions": { "allow": [] },
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "Edit|Write|Bash",
+        "hooks": [ { "type": "command",
+          "command": "cat >/dev/null || true; git rev-parse --git-dir >/dev/null 2>&1 && code-review-graph update --skip-flows --repo \"/Users/carlosvargas/Projects/sift\" || true",
+          "timeout": 30 } ] }
+    ],
+    "SessionStart": [
+      { "matcher": "",
+        "hooks": [
+          { "type": "command",
+            "command": "cat >/dev/null || true; git rev-parse --git-dir >/dev/null 2>&1 && code-review-graph status --repo \"/Users/carlosvargas/Projects/sift\" 2>/dev/null || echo 'CRG: not a git repo'",
+            "timeout": 10 },
+          { "type": "command",
+            "command": "bash \"/Users/carlosvargas/Projects/sift/.claude/hooks/session-governance.sh\" 2>/dev/null || true",
+            "timeout": 10 }
+        ] }
+    ]
+  }
+}

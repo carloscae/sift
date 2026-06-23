@@ -225,3 +225,5 @@ dist/
 .coverage
 .pytest_cache/
 .ruff_cache/
+
+.code-review-graph/
