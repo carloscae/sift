@@ -40,6 +40,57 @@ def test_writes_markdown_with_frontmatter(tmp_vault: Path):
     assert "The full transcript text." in content
 
 
+def test_writes_caption_section_and_degraded_summary_status(tmp_vault: Path):
+    """Task 3/2: caption metadata gets its own section; a degraded summary
+    is visibly flagged in frontmatter, and no Analysis section is written
+    when there's no AI summary."""
+    config = Config(vault=tmp_vault)
+    data = CaptureData(
+        item_id="abc456",
+        source="https://tiktok.com/foo",
+        platform="tiktok",
+        subtype="video-url",
+        title="Muted clip",
+        summary=None,
+        summary_status="degraded",
+        transcript_or_ocr="The full transcript text.",
+        caption_text="Uploader: someone\nDescription: about cats #cats",
+    )
+
+    out_path = write_capture(config, data)
+    content = out_path.read_text()
+
+    assert "summary_status: degraded" in content
+    assert "## Analysis" not in content
+    assert "## Caption" in content
+    assert "about cats #cats" in content
+    assert "## Transcript" in content
+    assert "The full transcript text." in content
+
+
+def test_caption_identical_to_transcript_is_not_duplicated(tmp_vault: Path):
+    """Silent-video degrade sets transcript_or_ocr == caption_text verbatim —
+    the note must not show the same text under two headers."""
+    config = Config(vault=tmp_vault)
+    same_text = "Uploader: someone\nDescription: silent clip"
+    data = CaptureData(
+        item_id="abc789",
+        source="https://tiktok.com/silent",
+        platform="tiktok",
+        subtype="video-url",
+        title="Silent clip",
+        transcript_or_ocr=same_text,
+        caption_text=same_text,
+    )
+
+    out_path = write_capture(config, data)
+    content = out_path.read_text()
+
+    assert "## Caption" in content
+    assert "## Transcript" not in content
+    assert content.count("silent clip") == 1
+
+
 def test_writes_stub_when_no_enrichment(tmp_vault: Path):
     config = Config(vault=tmp_vault)
     data = CaptureData(

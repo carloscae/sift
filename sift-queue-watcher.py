@@ -5,7 +5,7 @@ import os
 import sys
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 QUEUE_DIR = Path("/Users/carlosvargas/.sift-queue.d")
@@ -14,8 +14,6 @@ ENV_FILE = Path("/Users/carlosvargas/.sift/.env")
 VAULT = "/Users/carlosvargas/Library/Mobile Documents/iCloud~md~obsidian/Documents/Ideaverse"
 LAST_RUN_FILE = Path("/Users/carlosvargas/.sift/last-run.json")
 MAX_RETRIES = 3
-
-UTC = timezone.utc
 
 
 def _load_env() -> dict:
@@ -58,7 +56,13 @@ def _latest_capture_title(captures_path: Path) -> str:
     return "✓ saved to captures/"
 
 
-if __name__ == "__main__":
+def main() -> dict:
+    """Drain the queue dir once; return the last-run stats dict.
+
+    Pulled out of the `__main__` guard so tests can call it directly against
+    monkeypatched QUEUE_DIR / DEAD_DIR / VAULT / ENV_FILE / LAST_RUN_FILE
+    module globals, without touching the real filesystem paths.
+    """
     # Ensure log directory exists when LaunchAgent first fires
     Path.home().joinpath("Library/Logs/sift").mkdir(parents=True, exist_ok=True)
 
@@ -99,8 +103,9 @@ if __name__ == "__main__":
             queue = Queue(config)
             item_id = queue.enqueue_url(url)
             run = process_pending(config)
+            current_status = queue.get_status(item_id)
             saved, msg = confirmation_for(
-                item_id, run, lambda: _latest_capture_title(config.captures_path)
+                item_id, run, current_status, lambda: _latest_capture_title(config.captures_path)
             )
             if not saved:
                 # Item drained but did not save: fail this trigger file so the
@@ -134,7 +139,11 @@ if __name__ == "__main__":
                 entry["retries"] = retries
                 f.write_text(json.dumps(entry))
                 if _bot_token and chat_id:
-                    _tg_send(_bot_token, chat_id, f"❌ sift failed (attempt {retries}/{MAX_RETRIES}): {str(e)[:200]}")
+                    _tg_send(
+                        _bot_token,
+                        chat_id,
+                        f"❌ sift failed (attempt {retries}/{MAX_RETRIES}): {str(e)[:200]}",
+                    )
 
     last_run = {
         "timestamp": datetime.now(UTC).isoformat(),
@@ -144,3 +153,8 @@ if __name__ == "__main__":
         "duration_sec": round(time.time() - start_time, 1),
     }
     LAST_RUN_FILE.write_text(json.dumps(last_run, indent=2))
+    return last_run
+
+
+if __name__ == "__main__":
+    main()

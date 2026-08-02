@@ -55,24 +55,38 @@ class ProcessResult(BaseModel):
 def confirmation_for(
     item_id: str,
     result: ProcessResult,
+    current_status: str | None,
     latest_title: Callable[[], str],
 ) -> tuple[bool, str | None]:
     """Decide a watcher trigger's outcome and its Telegram confirmation text.
 
-    Returns ``(saved, message)``. ``saved=False`` means the item failed this
-    run: the caller must route to its failure path and send NO success
-    confirmation. A 'saved' item confirms with its real captured title; an
-    'absent' item (duplicate URL captured in a prior run) counts as saved and
-    falls back to the latest-capture title.
+    Returns ``(saved, message)``. ``saved=False`` means the caller must route
+    to its failure path and send NO success confirmation. A 'saved' item
+    confirms with its real captured title.
+
+    'absent' (the item wasn't touched by this run at all) is only ever
+    treated as success if ``current_status`` — the item's real status in the
+    queue DB, looked up by the caller after the run — is ``'processed'``:
+    that's a genuine duplicate URL captured in a prior run, and falls back to
+    the latest-capture title. An 'absent' item whose real status is
+    'pending' or 'failed' is NOT saved — it was never actually processed this
+    run, so reporting success would be a lie. This is the fix for the bug
+    where a re-enqueued failed item stayed invisible to pending_items() and
+    got silently reported as a success.
     """
     status, title = result.outcome_for(item_id)
     if status == "failed":
         return (False, None)
     if status == "saved" and title:
         return (True, f"✓ {title}")
-    return (True, latest_title())
+    # status == "absent"
+    if current_status == "processed":
+        return (True, latest_title())
+    return (False, None)
 
-_RESULT_FILE = Path(os.environ.get("SIFT_RESULT_FILE", "")) if os.environ.get("SIFT_RESULT_FILE") else None
+_RESULT_FILE = (
+    Path(os.environ.get("SIFT_RESULT_FILE", "")) if os.environ.get("SIFT_RESULT_FILE") else None
+)
 _BUDGET_FILE = Path.home() / ".sift" / "budget.json"
 
 
@@ -193,7 +207,12 @@ def _enrich_and_write(
     enriched_by: str | None = None
     title = result.title
     summary: str | None = None
+    summary_status: str | None = None
     tags: list[str] = []
+
+    # This is the attempt that will exhaust the retry budget if it fails too
+    # (mirrors Queue.mark_failed's own threshold check).
+    is_final_attempt = entry.attempts + 1 >= Queue.MAX_ATTEMPTS
 
     # Finding 10 fix: only delete audio in the finally block if transcription
     # was actually attempted.  When the enricher is unavailable, leave the
@@ -209,18 +228,47 @@ def _enrich_and_write(
                 models["stt"] = t.model
                 enriched_by = config.enricher.backend
 
-            summary_text = transcript_text or result.title
+            # Feed the extractor's caption metadata (uploader/description/
+            # hashtags — thin TikTok transcripts alone often lack topic
+            # signal) alongside the transcript, clearly labelled. Caption
+            # first: the enricher's internal truncation is a head-cut, so
+            # a long transcript loses its tail, never the caption. Skip the
+            # transcript block if it's identical to the caption (the
+            # silent-video degrade path sets both to the same string).
+            caption_text = result.caption_text
+            summary_parts = []
+            if caption_text:
+                summary_parts.append(f"[Post metadata]\n{caption_text}")
+            if transcript_text and transcript_text.strip() != (caption_text or "").strip():
+                summary_parts.append(f"[Transcript]\n{transcript_text}")
+            summary_text = "\n\n".join(summary_parts) if summary_parts else result.title
+
             if summary_text:
-                s = enricher.summarise(
-                    summary_text,
-                    context={"source": entry.source, "platform": result.platform},
-                )
-                cost_usd += s.cost_usd
-                models["text"] = s.model
-                enriched_by = config.enricher.backend
-                title = s.title
-                summary = s.summary
-                tags = s.tags
+                try:
+                    s = enricher.summarise(
+                        summary_text,
+                        context={"source": entry.source, "platform": result.platform},
+                    )
+                except Exception as exc:
+                    if not is_final_attempt:
+                        raise
+                    # Final attempt: a dead-lettered item throws away a
+                    # transcript that already downloaded and transcribed
+                    # fine. Degrade instead — ship what we have.
+                    logger.warning(
+                        "summarise-failed-degrading-to-partial",
+                        item_id=entry.id,
+                        source=entry.source,
+                        error=str(exc),
+                    )
+                    summary_status = "degraded"
+                else:
+                    cost_usd += s.cost_usd
+                    models["text"] = s.model
+                    enriched_by = config.enricher.backend
+                    title = s.title
+                    summary = s.summary
+                    tags = s.tags
     finally:
         # Only clean up the audio file when we actually tried to transcribe it.
         # If enricher was None, leave the file so retrying enrichment is possible.
@@ -231,10 +279,12 @@ def _enrich_and_write(
         item_id=entry.id,
         source=entry.source,
         platform=result.platform,
-        subtype=_subtype_from_media(result.media_type),
+        subtype=_subtype_from_media(result.media_type, result.metadata.get("degraded_reason")),
         title=title,
         summary=summary,
+        summary_status=summary_status,
         transcript_or_ocr=transcript_text,
+        caption_text=result.caption_text,
         tags=tags,
         enriched_by=enriched_by,
         cost_usd=cost_usd if enriched_by else None,
@@ -317,10 +367,17 @@ def _enrich_file_and_write(
 
 
 
-def _subtype_from_media(media_type: str) -> str:
+def _subtype_from_media(media_type: str, degraded_reason: str | None = None) -> str:
     if media_type == "audio":
         return "video-url"
     if media_type == "text":
+        # ac2dd77's silent-video degrade path reports media_type="text" for a
+        # muted/audio-less TikTok clip re-fetched as metadata-only — that's
+        # still a video, not an article, so it must not fall into
+        # "url-article" (which the writer treats as re-readable at the
+        # source URL and never shows the transcript/caption body for).
+        if degraded_reason == "silent-video-no-audio-stream":
+            return "video-url"
         return "url-article"
     if media_type == "image":
         return "photo"

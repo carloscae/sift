@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 from sift.classify import Item, classify_path, classify_url
 from sift.config import Config
 
-
 # Tracking-only query params stripped during URL normalization.
 _STRIP_PARAMS: frozenset[str] = frozenset(
     [
@@ -49,9 +48,7 @@ def _normalize_url(url: str) -> str:
         host = "youtube.com"
 
     # --- x.com → twitter.com ---
-    if host in ("x.com", "www.x.com"):
-        parsed = parsed._replace(netloc="twitter.com")
-    elif host == "www.twitter.com":
+    if host in ("x.com", "www.x.com") or host == "www.twitter.com":
         parsed = parsed._replace(netloc="twitter.com")
 
     # --- strip tracking params ---
@@ -69,6 +66,7 @@ class QueueEntry(BaseModel):
     platform: str | None = None
     local_path: str | None = None
     enqueued_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    attempts: int = 0
 
 
 _CREATE_TABLE = """
@@ -80,17 +78,24 @@ CREATE TABLE IF NOT EXISTS items (
     local_path  TEXT,
     status      TEXT NOT NULL DEFAULT 'pending',
     enqueued_at TEXT NOT NULL,
-    processed_at TEXT
+    processed_at TEXT,
+    attempts    INTEGER NOT NULL DEFAULT 0
 );
 """
 
 
 class Queue:
+    # Failures below this count are retried (status reset to 'pending').
+    # At this count, status becomes terminal 'failed' and the watcher's
+    # dead-letter path takes over. Mirrors MAX_RETRIES in sift-queue-watcher.py.
+    MAX_ATTEMPTS = 3
+
     def __init__(self, config: Config):
         self.config = config
         self._db_path = config.state_path / "queue.db"
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._migrate()
         self._prune_old()
 
     # ------------------------------------------------------------------
@@ -115,6 +120,17 @@ class Queue:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.execute(_CREATE_TABLE)
+
+    def _migrate(self) -> None:
+        """Idempotent schema migration for DBs created before a column existed.
+
+        Only ever adds columns with a safe default; never touches existing
+        data. Safe to run on every Queue() construction.
+        """
+        with self._connect() as conn:
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(items)")}
+            if "attempts" not in cols:
+                conn.execute("ALTER TABLE items ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
 
     def _prune_old(self) -> None:
         """Delete processed/failed rows older than 30 days."""
@@ -155,7 +171,18 @@ class Queue:
         item = classify_url(url)
         item_id = self._hash_source(_normalize_url(url))
         self._insert_item(item_id, item)
+        self._reset_if_terminal_failed(item_id)
         return item_id
+
+    def _reset_if_terminal_failed(self, item_id: str) -> None:
+        """Resending a URL that previously died terminal must actually retry
+        it, not silently no-op because the row already exists."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE items SET status = 'pending', attempts = 0 "
+                "WHERE id = ? AND status = 'failed'",
+                (item_id,),
+            )
 
     def enqueue_file(self, path: Path) -> str:
         item = classify_path(path)
@@ -190,7 +217,7 @@ class Queue:
     def pending_items(self) -> list[QueueEntry]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, source, kind, platform, local_path, enqueued_at "
+                "SELECT id, source, kind, platform, local_path, enqueued_at, attempts "
                 "FROM items WHERE status = 'pending'"
             ).fetchall()
         return [
@@ -201,6 +228,7 @@ class Queue:
                 platform=row["platform"],
                 local_path=row["local_path"],
                 enqueued_at=row["enqueued_at"],
+                attempts=row["attempts"],
             )
             for row in rows
         ]
@@ -214,17 +242,33 @@ class Queue:
             )
 
     def mark_failed(self, item_id: str) -> None:
+        """Record a failure. Below MAX_ATTEMPTS, reset to 'pending' so the
+        item is genuinely retried on the next run. At MAX_ATTEMPTS, status
+        becomes terminal 'failed' and stays that way."""
         now = datetime.now(UTC).isoformat()
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT attempts FROM items WHERE id = ?", (item_id,)
+            ).fetchone()
+            attempts = (row["attempts"] if row else 0) + 1
+            new_status = "pending" if attempts < self.MAX_ATTEMPTS else "failed"
             conn.execute(
-                "UPDATE items SET status = 'failed', processed_at = ? WHERE id = ?",
-                (now, item_id),
+                "UPDATE items SET status = ?, attempts = ?, processed_at = ? WHERE id = ?",
+                (new_status, attempts, now, item_id),
             )
+
+    def get_status(self, item_id: str) -> str | None:
+        """Return the current DB status for an item, or None if unknown."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM items WHERE id = ?", (item_id,)
+            ).fetchone()
+        return row["status"] if row else None
 
     def failed_items(self) -> list[QueueEntry]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, source, kind, platform, local_path, enqueued_at "
+                "SELECT id, source, kind, platform, local_path, enqueued_at, attempts "
                 "FROM items WHERE status = 'failed'"
             ).fetchall()
         return [
@@ -235,6 +279,7 @@ class Queue:
                 platform=row["platform"],
                 local_path=row["local_path"],
                 enqueued_at=row["enqueued_at"],
+                attempts=row["attempts"],
             )
             for row in rows
         ]

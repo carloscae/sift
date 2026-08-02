@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 from slugify import slugify as _ext_slugify
 
 from sift.config import Config
-from sift.version import __version__
 
 
 class CaptureData(BaseModel):
@@ -16,7 +15,9 @@ class CaptureData(BaseModel):
     subtype: str  # "video-url" | "voice-note" | "photo" | "url-article" | etc
     title: str = "Untitled"
     summary: str | None = None
+    summary_status: str | None = None  # "degraded" when the AI summary failed
     transcript_or_ocr: str | None = None
+    caption_text: str | None = None  # post metadata (uploader/description/hashtags)
     tags: list[str] = Field(default_factory=list)
     enriched_by: str | None = None
     cost_usd: float | None = None
@@ -65,6 +66,8 @@ def write_capture(config: Config, data: CaptureData) -> Path:
             f"tags: [{', '.join(tags)}]",
         ]
     )
+    if data.summary_status:
+        frontmatter_lines.append(f"summary_status: {data.summary_status}")
     frontmatter_lines.append("---")
 
     body_lines = [
@@ -77,8 +80,16 @@ def write_capture(config: Config, data: CaptureData) -> Path:
     ]
     if data.summary:
         body_lines.extend(["## Analysis", "", data.summary, ""])
-    # Transcript only for audio/video — text captures are re-readable at the source URL
-    if data.transcript_or_ocr and data.subtype in ("video-url", "voice-note", "video-file"):
+    if data.caption_text:
+        body_lines.extend(["## Caption", "", data.caption_text, ""])
+    # Transcript only for audio/video — text captures are re-readable at the source URL.
+    # Skip it when identical to the caption already shown above (the
+    # silent-video degrade path sets both to the same string).
+    if (
+        data.transcript_or_ocr
+        and data.subtype in ("video-url", "voice-note", "video-file")
+        and data.transcript_or_ocr.strip() != (data.caption_text or "").strip()
+    ):
         body_lines.extend(["## Transcript", "", data.transcript_or_ocr, ""])
 
     out_path.write_text("\n".join(frontmatter_lines + body_lines))
