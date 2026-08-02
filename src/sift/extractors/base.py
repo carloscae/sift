@@ -13,6 +13,7 @@ class ExtractResult(BaseModel):
     media_type: MediaType
     media_path: Path | None = None
     text_content: str | None = None
+    caption_text: str | None = None
     title: str = "Untitled"
     metadata: dict = Field(default_factory=dict)
     cost_usd: float = 0.0
