@@ -137,6 +137,13 @@ def main() -> dict:
                     )
             else:
                 entry["retries"] = retries
+                # Rewrite via unlink + create, not write_text in place. WatchPaths
+                # fires on the queue directory's mtime, and editing a file's
+                # contents does not change its parent's mtime, so an in-place
+                # rewrite left the retry sitting until the next URL happened to
+                # arrive. Removing and recreating the entry bumps the directory
+                # and re-triggers the LaunchAgent. Bounded by MAX_RETRIES.
+                f.unlink()
                 f.write_text(json.dumps(entry))
                 if _bot_token and chat_id:
                     _tg_send(
