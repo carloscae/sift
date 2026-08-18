@@ -1,10 +1,9 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+from yt_dlp.utils import DownloadError
 
 from sift.extractors.twitter import TwitterExtractor
-from yt_dlp.utils import DownloadError
 
 
 def test_can_handle_twitter_hosts():
@@ -54,7 +53,8 @@ def test_extract_text_tweet_fallback(tmp_path: Path):
         }
     }
     with patch("sift.extractors.twitter.YoutubeDL") as mock_ydl_cls:
-        mock_ydl_cls.return_value.__enter__.return_value.extract_info.side_effect = DownloadError("no video")
+        ext = mock_ydl_cls.return_value.__enter__.return_value.extract_info
+        ext.side_effect = DownloadError("no video")
         with patch("sift.extractors.twitter.httpx.get") as mock_get:
             mock_resp = MagicMock()
             mock_resp.json.return_value = fake_fx_response
@@ -78,7 +78,8 @@ def test_tco_resolves_before_extraction(tmp_path: Path):
     with patch("sift.extractors.twitter.httpx.head") as mock_head:
         mock_head.return_value.url = "https://x.com/bob/status/111"
         with patch("sift.extractors.twitter.YoutubeDL") as mock_ydl_cls:
-            mock_ydl_cls.return_value.__enter__.return_value.extract_info.side_effect = DownloadError("no video")
+            ext = mock_ydl_cls.return_value.__enter__.return_value.extract_info
+            ext.side_effect = DownloadError("no video")
             with patch("sift.extractors.twitter.httpx.get") as mock_get:
                 mock_resp = MagicMock()
                 mock_resp.json.return_value = fake_fx_response

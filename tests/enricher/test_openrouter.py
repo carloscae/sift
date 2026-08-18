@@ -26,7 +26,11 @@ def test_transcribe_calls_whisper_svc(tmp_path: Path, enricher: OpenRouterEnrich
     route = respx.post("http://localhost:8742/transcribe").mock(
         return_value=httpx.Response(
             200,
-            json={"transcript": "Hello there.", "language": "en", "model": "mlx-community/whisper-large-v3-turbo"},
+            json={
+                "transcript": "Hello there.",
+                "language": "en",
+                "model": "mlx-community/whisper-large-v3-turbo",
+            },
         )
     )
 

@@ -1,3 +1,4 @@
+import contextlib
 import re
 from pathlib import Path
 from urllib.parse import urlparse
@@ -32,7 +33,12 @@ def _fetch_via_fxtwitter(url: str) -> tuple[ExtractResult, bool]:
     if not tweet_id:
         raise ValueError(f"Cannot extract tweet ID from URL: {url}")
     api_url = _FXTWITTER_API.format(tweet_id=tweet_id)
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
     resp = httpx.get(api_url, timeout=15, follow_redirects=True, headers=headers)
     resp.raise_for_status()
     data = resp.json().get("tweet", {})
@@ -71,10 +77,10 @@ def _fetch_article_via_playwright(url: str) -> ExtractResult:
             page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
             # Wait for article body to appear
-            try:
-                page.wait_for_selector("[data-testid='article-content'], article, main", timeout=10000)
-            except Exception:
-                pass
+            with contextlib.suppress(Exception):
+                page.wait_for_selector(
+                    "[data-testid='article-content'], article, main", timeout=10000
+                )
 
             title = page.title().replace(" / X", "").strip()
             # Grab visible text from the article area, fall back to body
