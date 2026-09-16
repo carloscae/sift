@@ -208,24 +208,26 @@ These paths only resolve in Carlos's private Obsidian vault. External contributo
 
 If there's a `handoff.md` at the repo root, read it. Otherwise the priority list in this file IS the handoff.
 
-## MCP tools: code-review-graph
+## Code intelligence: codanna
 
-**Shared multi-repo endpoint: ALWAYS pass `repo_root="/Users/carlosvargas/Projects/sift"` to every code-review-graph tool call, or it will not resolve to this project.**
+This repo has a local symbol index in `.codanna/` (gitignored). It is a **CLI, not an MCP server**:
+run it from the repo root with Bash. There is no shared endpoint and no `repo_root` argument.
+`code-review-graph` was retired on 2026-09-16: it reported 37 affected files for a script with zero
+importers and returned 388 KB per call. codanna is correct, 118x smaller and 100x faster.
 
-Use the graph as the orienting layer for structural and aggregate questions, then confirm specifics with Grep/Read. It is strong at relationships, impact radius, and coupling that file scanning cannot surface. It is not built for line-level fact-finding.
+```
+codanna mcp search_symbols query:<text> [kind:function] [limit:10]
+codanna mcp find_symbol <ExactName>
+codanna mcp find_callers <name>
+codanna mcp get_calls <name>
+codanna mcp analyze_impact <name>
+codanna mcp semantic_search_with_context query:"<concept>" limit:5
+codanna mcp get_index_info
+```
 
-### Graph first (structure and aggregates)
+Add `--watch` to reindex changed files before the query, `--json` for machine output.
 
-- **Find by concept**: `semantic_search_nodes` — hybrid FTS5 + vector search. Handles conceptual queries, not just literal identifiers. No provider flag needed.
-- **Architecture / coupling**: `get_architecture_overview` (pass `detail_level: "minimal"` to stay in token budget) + `list_communities`.
-- **Impact / blast radius**: `get_impact_radius`, `get_affected_flows`.
-- **Relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for.
-- **Code review**: `detect_changes` + `get_review_context` (token-efficient).
-
-### Grep/Read first (line-level facts)
-
-- "Which line calls / where is this used" — ripgrep.
-- "Is this function pure / what does it actually do" — read the source.
-- Semantic search ranks nodes by relevance; it does not prove line-level facts. Locate with it, then confirm by reading.
-
-The graph auto-updates on edits via the PostToolUse hook and is re-embedded by the homelab crg-refresh job. Vectors live in `.code-review-graph/graph.db` (gitignored).
+Use it instead of a discovery grep for "where is X defined", "what calls X", "what breaks if I change
+X". Grep stays right for line-level facts once you know the file, and for anything that is not a
+symbol (config values, strings, comments). An empty `analyze_impact` result means nothing imports the
+symbol: that is a finding, not a miss. Rebuild after a bulk refactor: `codanna index . --force`.

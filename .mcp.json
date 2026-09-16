@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "code-review-graph": {
-      "type": "http",
-      "url": "http://100.76.99.98:5555/mcp"
-    }
-  }
-}
