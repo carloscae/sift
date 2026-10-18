@@ -2,6 +2,7 @@
 # Drains .sift-queue.d — called by WatchPaths LaunchAgent
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -14,6 +15,13 @@ ENV_FILE = Path("/Users/carlosvargas/.sift/.env")
 VAULT = "/Users/carlosvargas/Library/Mobile Documents/iCloud~md~obsidian/Documents/Ideaverse"
 LAST_RUN_FILE = Path("/Users/carlosvargas/.sift/last-run.json")
 MAX_RETRIES = 3
+# Secrets come from the SOPS store (~/Projects/secrets); ENV_FILE may still
+# override them for tests or local runs. env name -> SOPS key.
+SECRET_BIN = Path("/Users/carlosvargas/Projects/secrets/bin/secret")
+SOPS_KEYS = {
+    "OPENROUTER_API_KEY": "OPENROUTER_API_KEY",
+    "TELEGRAM_BOT_TOKEN": "CARLOS_AGENT_TELEGRAM_BOT_TOKEN",
+}
 
 
 def _load_env() -> dict:
@@ -24,6 +32,15 @@ def _load_env() -> dict:
             if line and not line.startswith("#") and "=" in line:
                 k, _, v = line.partition("=")
                 env[k.strip()] = v.strip()
+    for name, key in SOPS_KEYS.items():
+        if name in env or not SECRET_BIN.exists():
+            continue
+        try:
+            out = subprocess.run([str(SECRET_BIN), key], capture_output=True, text=True, timeout=30)
+            if out.returncode == 0 and out.stdout.strip():
+                env[name] = out.stdout.strip()
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"secret lookup failed for {key}: {e}", file=sys.stderr)
     return env
 
 

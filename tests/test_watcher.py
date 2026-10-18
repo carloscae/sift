@@ -32,6 +32,7 @@ def watcher(tmp_vault: Path, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(module, "QUEUE_DIR", queue_dir)
     monkeypatch.setattr(module, "DEAD_DIR", dead_dir)
     monkeypatch.setattr(module, "ENV_FILE", tmp_path / "nonexistent.env")
+    monkeypatch.setattr(module, "SOPS_KEYS", {})
     monkeypatch.setattr(module, "VAULT", str(tmp_vault))
     monkeypatch.setattr(module, "LAST_RUN_FILE", tmp_path / "last-run.json")
     # Never make a real network call in tests, however TELEGRAM_BOT_TOKEN happens
