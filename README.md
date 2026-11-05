@@ -12,7 +12,7 @@ We maintain extractors for the platforms that fight scraping the hardest, so you
 
 ## Status
 
-v0.2.0 — working daily driver.
+v0.2.0 feature set on `main` (untagged; `sift --version` still reports 0.1.0). Working daily driver.
 
 - **Extractors:** YouTube, TikTok, X/Twitter (video + text threads), generic articles
 - **Transcription:** local via [whisper-svc](https://github.com/carloscae/whisper-svc) (Whisper Large v3 Turbo, MLX)
@@ -22,7 +22,7 @@ v0.2.0 — working daily driver.
 ## Quickstart
 
 ```bash
-pip install sift
+pip install git+https://github.com/carloscae/sift   # not on PyPI: `pip install sift` installs an unrelated package
 sift init ~/Documents/MyVault
 ```
 
@@ -81,7 +81,7 @@ Key options:
 
 ```yaml
 enricher:
-  backend: openrouter         # openrouter | claude-cli | local
+  backend: openrouter         # openrouter | claude-cli | local (local is not implemented yet)
   monthly_budget_usd: 10      # optional; caps total openrouter spend per calendar month
 ```
 

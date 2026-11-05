@@ -1,6 +1,6 @@
 # Roadmap
 
-## v0.2.0 — shipped 2026-05-26
+## v0.2.0 — shipped 2026-05-26 (on `main`; not tagged, `version.py` still 0.1.0 as of 2026-11-05)
 
 SQLite queue, in-process watcher, budget guard, URL dedup normalization, last-run observability.
 
@@ -10,7 +10,7 @@ SQLite queue, in-process watcher, budget guard, URL dedup normalization, last-ru
 - Dead-letter queue at `~/.sift-queue.d/.dead/` after `MAX_RETRIES=3` failures.
 - `YtDlpAudioExtractor` base class in `extractors/ytdlp_base.py` — YouTube and TikTok are now thin subclasses.
 - Twitter: fxtwitter API first (fast, no auth); yt-dlp only for video tweets; Playwright soft dependency with clear error if not installed. `extraction_warning` metadata field on degraded fallback results.
-- `enriched_by` frontmatter records the actual backend (`openrouter` or `claude-cli`) instead of hardcoding `"openrouter"`.
+- `enriched_by` records the actual backend (`openrouter` or `claude-cli`) instead of hardcoding `"openrouter"`; it drives the note's `status` and is not a frontmatter field.
 - `monthly_budget_usd` enforced: checked against `~/.sift/budget.json` before enrichment starts each run.
 - `EnricherConfig.backend` is `Literal["openrouter", "claude-cli", "local"]` — typos caught at config load time.
 - `sift status` shows last-run timestamp, duration, processed/failed/dead-lettered counts.
@@ -36,7 +36,7 @@ YouTube + TikTok audio extraction (yt-dlp), generic article extraction (readabil
 ## v0.3.0 — Instagram + failure handling
 
 - Instagram (yt-dlp via cookie file)
-- `scan_raw` includes `failed` items in the seen-source check; explicit `--retry-failed` flag on `sift run`.
+- Explicit `--retry-failed` flag on `sift run` (terminal-failed files in `raw/` currently have no retry path).
 - Per-stage status on `QueueEntry` so "extraction worked, enrichment didn't" is distinguishable from "extraction failed."
 - Failure log surfaced via `sift status --verbose` with per-entry error_class.
 

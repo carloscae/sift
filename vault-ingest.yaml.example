@@ -8,7 +8,7 @@ vault: ~/Documents/MyVault           # absolute path to vault root
 raw_dir: raw                         # relative to vault, or absolute path
 output_dir: captures                 # relative to vault, or absolute path
 state_dir: .vault-ingest             # relative to vault, or absolute path; holds queue.db
-raw_ttl_days: 7                      # raw files older than this are deleted on next run
+raw_ttl_days: 7                      # NOT IMPLEMENTED yet (ignored by Config); planned
 
 # Tip: if your vault is on iCloud Drive, use absolute paths for raw_dir and state_dir
 # to avoid iCloud blocking file operations in background processes:
@@ -25,7 +25,7 @@ enricher:
   # openrouter — pay-per-token via OpenRouter API (~$0.0001/clip with Gemini Flash Lite).
   #   Supports all media types including image captioning.
 
-  backend: claude-cli                 # claude-cli | openrouter
+  backend: claude-cli                 # claude-cli | openrouter ("local" is accepted by Config but not implemented)
 
   claude_cli:
     claude_bin: claude                # full path if `claude` is not in PATH
@@ -39,7 +39,7 @@ enricher:
 
   monthly_budget_usd: 10             # optional; only applies to openrouter backend
 
-extractors:
+extractors:                         # NOT IMPLEMENTED yet (ignored by Config); use `sift run --upgrade-extractors`
   yt_dlp_auto_upgrade: true
 
 private_caption_keywords:

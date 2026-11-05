@@ -12,12 +12,12 @@ Vault-agnostic by design. Carlos's personal Telegram setup is one of N optional 
 
 Carlos Vargas — `carlos@carloscae.com` — GitHub `carloscae`.
 
-## Repo state (as of v0.2.0, 2026-05-26)
+## Repo state (verified 2026-11-05)
 
-- **Tag:** `v0.2.0` (see git tags for full history).
-- **CI:** GitHub Actions green on every push to `main`. Trunk-based development; no feature branches yet.
-- **Tests:** 58+ passing, ruff clean. Coverage focuses on contracts, not mocks.
-- **Phases shipped:** v0.1.0 (Phases 0–3), v0.1.1 (transcription), v0.1.2 (Twitter), v0.2.0 (SQLite queue, in-process watcher, budget guard, URL normalization, YtDlpAudioExtractor base, observability).
+- **Tags:** `v0.1.0`, `v0.1.1` only (`git tag`). The v0.2.0 work is on `main` but untagged, and `src/sift/version.py` and `pyproject.toml` still say `0.1.0`. No GitHub release exists (`gh release list`).
+- **CI:** GitHub Actions `test` workflow (ruff + pytest) runs on push/PR to `main`; latest run green 2026-11-05 (`gh run list`). Trunk-based development; no feature branches yet.
+- **Tests:** 102 passing, ruff clean (`uv run pytest -q`, `uv run ruff check src tests`, 2026-11-05). Coverage focuses on contracts, not mocks.
+- **Phases shipped:** v0.1.0 (Phases 0–3), v0.1.1 (transcription), v0.1.2 (Twitter), v0.2.0 work, untagged (SQLite queue, in-process watcher, budget guard, URL normalization, YtDlpAudioExtractor base, observability).
 
 ## What works end-to-end today
 
@@ -29,8 +29,8 @@ sift add https://example.com/some-article --now --vault <vault>
 
 - Article URLs through `GenericUrlExtractor` (httpx + readability-lxml) and either enricher backend. Full pipeline.
 - YouTube and TikTok URLs through yt-dlp: audio downloads, whisper-svc transcription, summarisation. Full pipeline.
-- X/Twitter URLs through fxtwitter (text/photos) or yt-dlp (video tweets). t.co resolution. Playwright path for `x.com/i/article/` (soft dep).
-- Image captioning via OpenRouter Gemini Flash (`caption()`). Wired but no CLI surface yet for "add this png".
+- X/Twitter URLs through fxtwitter (text/photos) or yt-dlp (video tweets). t.co resolution. Playwright path for `x.com/i/article/` (declared in `pyproject.toml`, import guarded; Chromium needs `playwright install chromium`).
+- Image captioning via OpenRouter Gemini Flash (`caption()`), reached with `sift add <image file>` (copied to `raw/`). openrouter backend only: `ClaudeCliEnricher.caption` raises `NotImplementedError`.
 - Queue persistence at `<vault>/.vault-ingest/queue.db` (SQLite, WAL mode). URL dedup via normalization. Auto-prune >30 days.
 - Budget guard: `monthly_budget_usd` in config enforced against `~/.sift/budget.json`.
 - `sift status` lists pending items + last-run stats (timestamp, duration, processed/failed/dead-lettered).
@@ -39,9 +39,9 @@ sift add https://example.com/some-article --now --vault <vault>
 
 ## What does NOT work / known gaps
 
-- Re-running a failed item silently re-enqueues it from `raw/` on the next `sift run` (no `failed` items in `seen_sources`). Explicit `--retry-failed` is v0.3.0.
+- A failure is retried up to `Queue.MAX_ATTEMPTS` (3), then the row is terminal `failed`. `sift add <url>` resets a terminal-failed URL; a terminal-failed file in `raw/` stays `failed` with no CLI path to retry it (`scan_raw` returns it but `process_pending` only runs `pending` rows). Explicit `--retry-failed` is v0.3.0.
 - No content filtering: `config.private_caption_keywords` is defined but never read.
-- No retry / rate-limit handling. `httpx` is sync.
+- No rate-limit or backoff handling (retries are count-based only, 3 attempts). `httpx` is sync.
 - `OCRResult` type is exported but never produced (the caption path uses `CaptionResult`).
 - Queue has no per-step status — a failure marks the whole item failed, losing partial progress.
 
@@ -93,13 +93,13 @@ Two registries underpin the pluggability:
 | `src/sift/config.py` | Pydantic `Config` model loaded from `vault-ingest.yaml`. `OpenRouterConfig` + `ClaudeCliConfig` + `EnricherConfig` nested. `EnricherConfig.backend` is `Literal["openrouter", "claude-cli", "local"]`. |
 | `src/sift/classify.py` | `classify_url(url)` and `classify_path(path)` returning typed `Item`. Hostname → platform mapping. |
 | `src/sift/queue.py` | SQLite-backed queue (WAL mode). SHA256-prefix item IDs derived from normalized URLs. `scan_raw` is batched. Auto-prunes processed/failed rows >30 days on init. |
-| `src/sift/writer.py` | Markdown emission. python-slugify for non-Latin title safety. `ingested-via: sift@{__version__}`. |
+| `src/sift/writer.py` | Markdown emission. python-slugify for non-Latin title safety. Frontmatter: `type`, `subtype`, `date`, `source`, `platform`, `status`, `tags` (+ `summary_status` when degraded). No version or cost stamp (tests assert `enrich-cost-usd` is absent). |
 | `src/sift/pipeline.py` | Orchestrator. URL → dispatch_extract → enrich → write. File → enrich-file → write. Cleans work_dir in a `finally`. |
 | `src/sift/extractors/base.py` | `Extractor` ABC, `ExtractResult` / `ExtractFailure`, `_REGISTRY` + helpers. |
 | `src/sift/extractors/dispatch.py` | `dispatch_extract(url, work_dir)` parses hostname, routes to extractor, wraps exceptions in `ExtractFailure`. |
 | `src/sift/extractors/ytdlp_base.py` | `YtDlpAudioExtractor` base class. Owns yt-dlp options + ffmpeg post-processor. Subclasses declare `platform` + `_HOSTS`. |
 | `src/sift/extractors/{youtube,tiktok}.py` | Thin subclasses of `YtDlpAudioExtractor`. |
-| `src/sift/extractors/twitter.py` | fxtwitter first (text/photo), yt-dlp for video tweets, Playwright for article URLs. Playwright is a soft dep. |
+| `src/sift/extractors/twitter.py` | fxtwitter first (text/photo), yt-dlp for video tweets, Playwright for article URLs. Import guarded; raises `RuntimeError` if Playwright is missing. |
 | `src/sift/extractors/generic_url.py` | httpx + readability-lxml catch-all. Must be registered last. |
 | `src/sift/extractors/__init__.py` | Side-effect: `_register_builtins()` registers TikTok → YouTube → Twitter → Generic (order matters). |
 | `src/sift/enricher/base.py` | `Enricher` ABC + `TranscriptResult` / `CaptionResult` / `OCRResult` / `SummaryResult`. |
@@ -141,7 +141,7 @@ Two registries underpin the pluggability:
 cd ~/Projects/sift
 export PATH="$HOME/.local/bin:$PATH"   # if uv isn't on PATH
 uv sync                                 # install deps + dev deps
-uv run pytest -q                        # 51 tests, < 1s
+uv run pytest -q                        # 102 tests, ~7s
 uv run ruff check src tests             # lint
 uv run sift --help                      # try the CLI
 ```
@@ -149,7 +149,7 @@ uv run sift --help                      # try the CLI
 To run sift against a throwaway vault:
 
 ```bash
-export OPENROUTER_API_KEY="$(security find-generic-password -a "$USER" -s OPENROUTER_API_KEY -w)"
+export OPENROUTER_API_KEY="$(~/Projects/secrets/bin/secret OPENROUTER_API_KEY)"
 mkdir /tmp/sift-test
 uv run sift init /tmp/sift-test
 uv run sift add https://example.com/some-article --vault /tmp/sift-test --now
@@ -165,7 +165,7 @@ export SIFT_CONFIG=/tmp/sift-test/.config/sift.yaml
 uv run sift add https://example.com/some-article --now
 ```
 
-The OPENROUTER_API_KEY is in Carlos's macOS keychain on the laptop (saved 2026-05-19, source: `~/Projects/AkiraProject/.env`). Never commit it.
+The OPENROUTER_API_KEY lives in the SOPS store (`~/Projects/secrets/`); the watcher reads it (and `TELEGRAM_BOT_TOKEN`) through `~/Projects/secrets/bin/secret`, with `~/.sift/.env` as an optional override. Never use the Keychain, never commit it.
 
 ## Pick up here — next priorities
 
@@ -173,25 +173,24 @@ In priority order:
 
 1. **v0.3.0: Instagram + failure handling.**
    - Instagram (yt-dlp via cookie file).
-   - `scan_raw` should include `failed` items in `seen_sources` so re-dropped files don't silently retry. Add a `--retry-failed` flag to `sift run` for explicit retry.
+   - Add a `--retry-failed` flag to `sift run` so terminal-failed items (including files in `raw/`) can be retried explicitly.
    - Per-stage status on `QueueEntry` so "extraction worked, enrichment didn't" is distinguishable.
    - Failure log surfaced via `sift status --verbose` with per-entry error_class.
 2. **Quality items deferred from earlier reviews:**
-   - `_subtype_from_media` accepts `platform` but never uses it. Either use it (per-platform subtype routing) or drop the parameter.
    - `_clear_extractor_registry` fixture should be `clear → yield → clear` to handle test errors mid-execution.
    - Remove `OCRResult` from `enricher/base.py` or wire it through the vision path.
    - Remove `Config.private_caption_keywords` or implement the filter.
    - Add a `priority` field to `Extractor` ABC so registration order isn't positional.
-3. **Tag and publish v0.2.0 GitHub release** if not already done. Update the release notes at https://github.com/carloscae/sift/releases.
+3. **Bump `version.py` + `pyproject.toml` to 0.2.0, tag `v0.2.0`, and publish the GitHub release.** Not done as of 2026-11-05 (`git tag` shows v0.1.0, v0.1.1; `gh release list` is empty).
 
-For the full long-form roadmap see `ROADMAP.md`. The vault plan ([[personal/projects/vault-ingest-plan-v1]] in Carlos's Obsidian vault) covered Phases 0–3 exhaustively; Phases 4–12 are still in the spec ([[personal/projects/vault-ingest-design]]) but haven't been turned into TDD task lists yet.
+For the full long-form roadmap see `ROADMAP.md`. The vault plan (`personal/projects/vault-ingest-plan-v1`, no longer in the vault as of 2026-11-05) covered Phases 0–3 exhaustively; Phases 4–12 are still in the spec ([[personal/projects/vault-ingest-design]]) but haven't been turned into TDD task lists yet.
 
 ## Vault cross-references (Carlos only)
 
 These paths only resolve in Carlos's private Obsidian vault. External contributors: ignore.
 
 - `personal/projects/vault-ingest-design.md` — full spec (Phases 0–12).
-- `personal/projects/vault-ingest-plan-v1.md` — executable plan for Phases 0–3 (delivered as v0.1.0).
+- `personal/projects/vault-ingest-plan-v1.md` — executable plan for Phases 0–3 (delivered as v0.1.0). File not found in the vault as of 2026-11-05.
 - `personal/projects/oss-clout-strategy.md` — selective OSS publishing strategy. sift is in the portfolio.
 - `_internal/log.md` — append-only session log. Entry for the 2026-05-19 v0.1.0 build is filed under `## [2026-05-19] implementation`.
 - `CLAUDE.md` (vault root) — OSS portfolio bullet under "Who is Carlos" references this repo.

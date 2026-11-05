@@ -32,9 +32,9 @@ classify  →  queue  →  extract  →  enrich  →  write
 
 3. **Extract** (`src/sift/extractors/`). For URL items, route to the right extractor by hostname and produce an `ExtractResult` (downloaded media path + metadata) or an `ExtractFailure` (typed error class + diagnostic text + suggested user fallback). Four built-ins ship: YouTube (yt-dlp), TikTok (yt-dlp), Twitter/X, and a generic article extractor (httpx + readability-lxml). File items skip extraction.
 
-4. **Enrich** (`src/sift/enricher/`). Audio gets transcribed via whisper-svc. Text gets summarised. Images get captioned + OCR'd. All operations return a typed result with `cost_usd` stamped, so the writer can record what each capture cost. Monthly budget is enforced before enrichment starts (checked against `~/.sift/budget.json`). If the budget is exceeded, the enricher is not instantiated and items are written without enrichment.
+4. **Enrich** (`src/sift/enricher/`). Audio gets transcribed via whisper-svc. Text gets summarised. Images get captioned + OCR'd. All operations return a typed result with `cost_usd` stamped, so the pipeline can sum spend into `~/.sift/budget.json`. Monthly budget is enforced before enrichment starts (checked against `~/.sift/budget.json`). If the budget is exceeded, the enricher is not instantiated and items are written without enrichment.
 
-5. **Write** (`src/sift/writer.py`). Emit `captures/{YYYY-MM-DD}-{slug}-{item_id[:6]}.md` with YAML frontmatter and a markdown body. Frontmatter captures source, platform, ingestion version (`sift@{__version__}`), enrichment metadata, cost, and the backend that produced the enrichment (`enriched_by: openrouter` or `enriched_by: claude-cli`).
+5. **Write** (`src/sift/writer.py`). Emit `captures/{YYYY-MM-DD}-{slug}-{item_id[:6]}.md` with YAML frontmatter and a markdown body. Frontmatter carries `type`, `subtype`, `date`, `source`, `platform`, `status` (`raw` when enriched, `pending-enrichment` otherwise), `tags`, and `summary_status: degraded` when the summary step failed on its final attempt. Cost, models, backend name and `sift@<version>` are not written to the note (`src/sift/writer.py`).
 
 The orchestrator (`src/sift/pipeline.py`) ties the stages together. It catches exceptions per-item and routes them to `mark_failed`, so one bad URL doesn't sink the batch.
 
@@ -89,7 +89,7 @@ Extractor (ABC)
 
 `YtDlpAudioExtractor` is the shared base for platforms that yield audio via yt-dlp. It owns the yt-dlp options, the ffmpeg post-processor config, and the `can_handle` pattern (`self._HOSTS` set). Subclasses only need to declare `platform` and `_HOSTS`.
 
-`TwitterExtractor` is independent because its extraction strategy is more complex: fxtwitter API first (fast, no auth), yt-dlp only for video tweets, Playwright for `x.com/i/article/` URLs. Playwright is a soft dependency — a clear `RuntimeError` is raised if it's not installed.
+`TwitterExtractor` is independent because its extraction strategy is more complex: fxtwitter API first (fast, no auth), yt-dlp only for video tweets, Playwright for `x.com/i/article/` URLs. Playwright is declared in `pyproject.toml` but its import is guarded: a clear `RuntimeError` is raised if it is missing, and Chromium needs `playwright install chromium`.
 
 ### Enricher registry
 
@@ -130,6 +130,7 @@ class QueueEntry(BaseModel):
     platform: str | None
     local_path: str | None
     enqueued_at: str          # ISO 8601
+    attempts: int             # failed attempts so far
 
 # Extract output
 class ExtractResult(BaseModel):
@@ -137,6 +138,7 @@ class ExtractResult(BaseModel):
     media_type: Literal["audio", "video", "image", "text", "mixed"]
     media_path: Path | None   # downloaded media, moves to vault/raw/
     text_content: str | None  # for article extractors
+    caption_text: str | None  # post metadata (uploader/description/hashtags)
     title: str
     metadata: dict            # may include extraction_warning for degraded results
     cost_usd: float
@@ -157,8 +159,8 @@ class OCRResult(BaseModel):        text, model, cost_usd  # reserved, unused in 
 
 # Write input
 class CaptureData(BaseModel):
-    item_id, source, platform, subtype, title, summary,
-    transcript_or_ocr, tags, enriched_by, cost_usd, models, raw_file
+    item_id, source, platform, subtype, title, summary, summary_status,
+    transcript_or_ocr, caption_text, tags, enriched_by, cost_usd, models
 ```
 
 ## Persistence layout
@@ -180,7 +182,7 @@ class CaptureData(BaseModel):
 
 <vault>/
 ├── vault-ingest.yaml
-├── raw/              # downloaded media (7-day TTL, configurable)
+├── raw/              # downloaded media and dropped files (no TTL enforcement yet; `raw_ttl_days` is not implemented)
 │   └── <item-id>-<filename>.mp3
 ├── captures/         # produced markdown notes
 │   └── 2026-05-19-some-title-abc123.md
@@ -210,7 +212,7 @@ The budget only applies to API-cost backends (`openrouter`). `claude-cli` and fu
 ```
 URL → dispatch_extract → ExtractFailure
                               ↓
-                  queue.mark_failed(item_id)
+                  queue.mark_failed(item_id)   # pending again until attempts == MAX_ATTEMPTS (3), then terminal 'failed'
                               ↓
                (no capture file written for extraction failures)
 ```
@@ -219,13 +221,13 @@ For watcher-driven runs: after `MAX_RETRIES=3` failures on the same `.sift-queue
 
 ## Cost tracking
 
-Every enricher call stamps a `cost_usd` on its result. The pipeline sums these and writes the total to frontmatter as `enrich-cost-usd: 0.0001`. Spend is also accumulated to `~/.sift/budget.json` for the monthly cap.
+Every enricher call stamps a `cost_usd` on its result. The pipeline sums these and accumulates the spend to `~/.sift/budget.json` for the monthly cap. The cost is not written into the note (tests assert `enrich-cost-usd` is absent).
 
 - **whisper-svc transcription:** always `0.0` (local model, no API cost).
 - **claude-cli summarisation:** always `0.0` (uses Claude subscription).
 - **openrouter summarisation/caption:** calculated from token usage at model rates. Constants live in `src/sift/enricher/openrouter.py`.
 
-The `enriched_by` field in capture frontmatter records the actual backend (`openrouter` or `claude-cli`), not a hardcoded string.
+`enriched_by` (the backend that produced the enrichment) is set on `CaptureData` and decides the note's `status`; it is not emitted as a frontmatter field.
 
 ## Adding a new extractor
 
@@ -252,4 +254,4 @@ The `enriched_by` field in capture frontmatter records the actual backend (`open
 - **`httpx.Client` is synchronous.** Fine for a personal CLI; will need `AsyncClient` once an HTTP-endpoint mode lands.
 - **Queue has no per-step status.** A failure marks the whole item failed, losing the partial success of "extraction worked, enrichment didn't." A `stage_status` field on `QueueEntry` is planned for v0.3.0.
 - **No backpressure / batching.** `process_pending` processes everything in the pending bucket sequentially.
-- **Playwright is a soft dependency.** Only required for `x.com/i/article/` URLs. Missing Playwright produces a clear error message rather than an import error at startup.
+- **Playwright import is guarded.** Only used for `x.com/i/article/` URLs (still declared in `pyproject.toml`). A missing install produces a clear error message rather than an import error at startup.
